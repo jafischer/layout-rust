@@ -1,0 +1,10 @@
+target/
+Cargo.lock
+.idea/
+.vscode/
+/lib/win/
+/lib/mac/
+.env
+
+# For now, I'm using symlinks to pull in the crates from meccano, rather than the cumbersome local-registry
+/meccano/

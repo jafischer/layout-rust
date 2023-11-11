@@ -1,0 +1,26 @@
+[package]
+name = "layout-rust"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Command line parsing.
+clap = { version = "4.4.7", features = ["derive"] }
+
+# Cocoa bindings
+core-foundation = "0.9.3"
+core-foundation-sys = "0.8.4"
+core-graphics-types = "0.1.2"
+core-graphics = "0.23.1"
+core-text = "20.1.0"
+cocoa = "0.25.0"
+cocoa-foundation = "0.1.2"
+
+# Logging
+log = "0.4.17"
+log4rs = "1.2.0"
+
+serde = "1.0.192"
+serde_json = "1.0.108"
