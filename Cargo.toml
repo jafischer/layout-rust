@@ -6,6 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Convenient Results
+anyhow = "1.0.75"
+
 # Command line parsing.
 clap = { version = "4.4.7", features = ["derive"] }
 
@@ -22,5 +25,9 @@ cocoa-foundation = "0.1.2"
 log = "0.4.17"
 log4rs = "1.2.0"
 
+# Needed for msg_send! macro.
+objc = "0.2.7"
+
+regex = "1.10.2"
 serde = "1.0.192"
 serde_json = "1.0.108"
