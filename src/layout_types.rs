@@ -1,4 +1,5 @@
 use crate::layout_types::MaybeRegex::{Exact, RE};
+use core_graphics_types::base::CGFloat;
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -108,8 +109,31 @@ impl Default for MaybeRegex {
 
 impl Rect {
     // I only care if the origin is inside the rect, not the whole rect being contained.
-    pub(crate) fn contains_origin(&self, p0: &Rect) -> bool {
+    pub fn contains_origin(&self, p0: &Rect) -> bool {
         p0.x >= self.x && p0.x < self.x + self.w && p0.y >= self.y && p0.y < self.y + self.h
+    }
+
+    // Rather than checking for equality, check for "within a couple of pixels" because I've found
+    // that after moving, the window coords don't always exactly match what I sent.
+    pub fn is_close(&self, other: &Rect) -> bool {
+        (self.x - other.x).abs() < 4
+            && (self.y - other.y).abs() < 4
+            && (self.w - other.w).abs() < 4
+            && (self.h - other.h).abs() < 4
+    }
+
+    pub fn origin(&self) -> CGPoint {
+        CGPoint {
+            x: self.x as CGFloat,
+            y: self.y as CGFloat,
+        }
+    }
+
+    pub fn size(&self) -> CGSize {
+        CGSize {
+            width: self.w as CGFloat,
+            height: self.h as CGFloat,
+        }
     }
 }
 
