@@ -1,25 +1,32 @@
 use crate::idref::IdRef;
+use crate::layout_types::MaybeRegex::Exact;
+use crate::layout_types::WindowIds;
+use accessibility_sys::{
+    kAXErrorSuccess, kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue,
+    AXUIElementCreateApplication, AXUIElementRef,
+};
+use anyhow::anyhow;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use cocoa::appkit::NSScreen;
 use cocoa_foundation::base::{id, nil};
-use cocoa_foundation::foundation::{NSFastEnumeration, NSString, NSUInteger};
+use cocoa_foundation::foundation::{NSArray, NSFastEnumeration, NSString, NSUInteger};
 use core_foundation::base::*;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::*;
 use core_foundation::string::*;
 use core_foundation_sys::dictionary::CFDictionaryRef;
-use core_foundation_sys::string::{kCFStringEncodingUTF8, CFStringGetCStringPtr, CFStringRef};
+use core_foundation_sys::string::CFStringRef;
 use core_graphics::display;
-use core_graphics::display::{CGDirectDisplayID, CGDisplay};
+use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGWindowID};
 use core_graphics_types::geometry::CGRect;
-use layout_types::{Layout, Rect, ScreenLayout, WindowLayout};
-use log::error;
+use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
+use log::{debug, error, trace};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
 use objc::msg_send;
 use std::collections::{BTreeMap, HashSet};
-use std::ffi::{c_void, CStr};
+use std::ffi::c_void;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -71,13 +78,6 @@ fn save_layout() {
     println!("{}", serde_json::to_string_pretty(&layout).unwrap());
 }
 
-fn get_layout() -> Layout {
-    let screens = get_screens();
-    let windows = get_windows(&screens);
-    let layout = Layout { screens, windows };
-    layout
-}
-
 fn restore_layout() {
     let home = env!("HOME");
     let path = format!("{}/.layout.json", home);
@@ -85,13 +85,77 @@ fn restore_layout() {
     let file = File::open(&path).expect(&format!("Failed to open {}", path));
     let reader = BufReader::new(file);
 
-    // Read the JSON contents of the file as an instance of `User`.
     let desired_layout: Layout =
         serde_json::from_reader(reader).expect(&format!("Failed to parse JSON file {}", path));
 
     let current_layout = get_layout();
 
-    for window_layout in current_layout.windows {}
+    for window_info in current_layout.windows {
+        // This is O(n) and thus the entire loop is basically O(n^2) but whatevs.
+        // We're talking dozens, not millions.
+        if let Some(desired_window_info) = desired_layout
+            .windows
+            .iter()
+            .find(|d| d.matches(&window_info))
+        {
+            trace!(
+                "Found match for window {:?}/{:?}: {:?}/{:?}",
+                window_info.owner_name,
+                window_info.name,
+                desired_window_info.owner_name,
+                desired_window_info.name,
+            );
+            trace!(
+                "Current bounds: {:?}, desired: {:?}",
+                window_info.bounds,
+                desired_window_info.bounds
+            );
+
+            let current_absolute_bounds = absolute_bounds(
+                &window_info.bounds,
+                window_info.screen_num as usize,
+                &current_layout.screens,
+            );
+            let desired_absolute_bounds = absolute_bounds(
+                &desired_window_info.bounds,
+                desired_window_info.screen_num as usize,
+                &desired_layout.screens,
+            );
+
+            if current_absolute_bounds != desired_absolute_bounds {
+                debug!(
+                    "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
+                    window_info.owner_name,
+                    window_info.name,
+                    current_absolute_bounds,
+                    desired_absolute_bounds
+                );
+                let screen_index =
+                    nearest_screen(&desired_absolute_bounds, &current_layout.screens);
+
+                let new_bounds = Rect {
+                    x: desired_absolute_bounds.x - current_layout.screens[screen_index].frame.x,
+                    y: desired_absolute_bounds.y - current_layout.screens[screen_index].frame.y,
+                    w: desired_absolute_bounds.w,
+                    h: desired_absolute_bounds.h,
+                };
+
+                for ids in window_info.ids {
+                    if let Ok(axwindow) = get_axwindow(ids.process_id, ids.window_id) {}
+                }
+            }
+        }
+    }
+}
+
+fn is_close(x1: i32, y1: i32, x2: i32, y2: i32) -> bool {
+    (x1 - x2).abs() < 4 && (y1 - y2).abs() < 4
+}
+
+fn get_layout() -> Layout {
+    let screens = get_screens();
+    let windows = get_windows(&screens);
+    Layout { screens, windows }
 }
 
 fn owners_to_ignore() -> HashSet<String> {
@@ -102,80 +166,96 @@ fn owners_to_ignore() -> HashSet<String> {
     ])
 }
 
-fn get_windows(screens: &Vec<ScreenLayout>) -> Vec<WindowLayout> {
+fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
     // Use a map of maps here to get a nicely ordered list. Ordered by owner name and then name.
-    let mut window_map: BTreeMap<String, BTreeMap<String, WindowLayout>> = BTreeMap::new();
+    let mut window_map: BTreeMap<String, BTreeMap<String, WindowInfo>> = BTreeMap::new();
     let owners_to_ignore = owners_to_ignore();
 
-    let window_infos = CGDisplay::window_list_info(
+    let cg_window_infos = CGDisplay::window_list_info(
         display::kCGWindowListExcludeDesktopElements | display::kCGWindowListOptionOnScreenOnly,
         None,
     );
 
-    if window_infos.is_none() {
+    if cg_window_infos.is_none() {
         error!("Failed to retrieve list of windows.");
         return Vec::new();
     }
 
-    let window_infos = window_infos.unwrap();
+    let cg_window_infos = cg_window_infos.unwrap();
 
-    for window_info in window_infos.iter() {
+    for cg_window_info in cg_window_infos.iter() {
         // window_info is a dictionary. Need to recast...
         let window_dict: CFDictionary<*const c_void, *const c_void> =
-            unsafe { CFDictionary::wrap_under_get_rule(*window_info as CFDictionaryRef) };
+            unsafe { CFDictionary::wrap_under_get_rule(*cg_window_info as CFDictionaryRef) };
 
-        let mut window_layout = WindowLayout::default();
+        let mut window_info = WindowInfo::default();
 
         // debug!("Window keys: {:?}", get_dict_keys(&window_dict));
+        // Window keys:
+        // ["kCGWindowLayer", "kCGWindowAlpha", "kCGWindowMemoryUsage", "kCGWindowIsOnscreen",
+        // "kCGWindowSharingState", "kCGWindowOwnerPID", "kCGWindowNumber", "kCGWindowOwnerName",
+        // "kCGWindowStoreType", "kCGWindowBounds", "kCGWindowName"]
 
         let owner_name = get_string_from_dict(&window_dict, "kCGWindowOwnerName");
-        let name = get_string_from_dict(&window_dict, "kCGWindowName");
+        let window_name = get_string_from_dict(&window_dict, "kCGWindowName");
 
         // Skip some obvious windows: empty names, or names in the ignore list.
-        if owner_name.is_empty() || name.is_empty() || owners_to_ignore.contains(&owner_name) {
+        if owner_name.is_empty() || window_name.is_empty() || owners_to_ignore.contains(&owner_name)
+        {
             continue;
         }
 
-        window_layout.owner_name = owner_name.clone();
-        window_layout.name = name.clone();
+        window_info.owner_name = Exact(owner_name.clone());
+        window_info.name = Exact(window_name.clone());
         let bounds = match get_dict_from_dict(&window_dict, "kCGWindowBounds") {
             Some(value) => value,
             None => continue,
         };
 
+        let process_id: i32 = get_num_from_dict(&window_dict, "kCGWindowOwnerPID");
+        let window_id: u32 = get_num_from_dict(&window_dict, "kCGWindowNumber");
+
         let bounds = CGRect::from_dict_representation(&bounds).unwrap();
 
-        window_layout.bounds = bounds.into();
+        window_info.bounds = bounds.into();
 
         // Skip windows below a certain size
-        if window_layout.bounds.w <= MIN_WIDTH && window_layout.bounds.h <= MIN_HEIGHT {
+        if window_info.bounds.w <= MIN_WIDTH && window_info.bounds.h <= MIN_HEIGHT {
             continue;
         }
 
-        let (display_id, adjusted_bounds) = adjusted_bounds(&window_layout.bounds, &screens);
-        window_layout.display_id = display_id;
-        window_layout.bounds = adjusted_bounds;
+        let (display_id, adjusted_bounds) = relative_bounds(&window_info.bounds, &screens);
+        window_info.screen_num = display_id as usize;
+        window_info.bounds = adjusted_bounds;
 
         if !window_map.contains_key(&owner_name) {
             window_map.insert(owner_name.clone(), BTreeMap::new());
         }
-        window_map
-            .get_mut(&owner_name)
-            .unwrap()
-            .insert(name, window_layout);
+        let owner_map = window_map.get_mut(&owner_name).unwrap();
+
+        if let Some(matching_window_info) = owner_map.get(&window_name) {
+            window_info.ids = matching_window_info.ids.clone();
+        } else {
+            window_info.ids = Vec::new();
+        }
+        window_info.ids.push(WindowIds {
+            process_id,
+            window_id,
+        });
+        owner_map.insert(window_name, window_info);
     }
 
     // Now flatten the map of maps into a vector that is sorted by Owner Name and then Name.
     window_map
         .into_iter()
         .map(|(_, windows_by_owner)| windows_by_owner)
-        .collect::<Vec<BTreeMap<String, WindowLayout>>>()
+        .collect::<Vec<BTreeMap<String, WindowInfo>>>()
         .into_iter()
         .flat_map(|windows_by_owner| {
             windows_by_owner
                 .into_iter()
                 .map(|(_, v)| v)
-                .collect::<Vec<WindowLayout>>()
+                .collect::<Vec<WindowInfo>>()
         })
         .collect()
 }
@@ -183,23 +263,30 @@ fn get_windows(screens: &Vec<ScreenLayout>) -> Vec<WindowLayout> {
 #[macro_use]
 extern crate objc;
 
-fn get_screens() -> Vec<ScreenLayout> {
+fn get_screens() -> Vec<ScreenInfo> {
     let mut screens = Vec::new();
 
     unsafe {
         let nsscreens = NSScreen::screens(nil);
+        let primary_screen = NSScreen::mainScreen(nil);
+        let primary_frame = primary_screen.frame();
         let screen_num_key = IdRef::new(NSString::alloc(nil).init_str("NSScreenNumber"));
 
         for screen in nsscreens.iter() {
             let frame = screen.frame();
+
+            // I'm going to convert all NSScreen coords (which are bizarrely reversed in the Y axis) to the
+            // same as window coords.
+            let fixed_y = primary_frame.size.height - frame.size.height - frame.origin.y;
+
             let device_desc = screen.deviceDescription();
             let value: id = msg_send![device_desc, objectForKey:*screen_num_key];
             let value: NSUInteger = msg_send![value, unsignedIntegerValue];
-            screens.push(ScreenLayout {
+            screens.push(ScreenInfo {
                 id: value as u32,
                 frame: Rect {
                     x: frame.origin.x as i32,
-                    y: frame.origin.y as i32,
+                    y: fixed_y as i32,
                     w: frame.size.width as i32,
                     h: frame.size.height as i32,
                 },
@@ -216,7 +303,7 @@ fn get_dict_keys(dict: &CFDictionary) -> Vec<String> {
 
     let mut results = Vec::new();
     for i in 0..length {
-        results.push(string_ref_to_string(keys[i] as CFStringRef));
+        results.push(unsafe { CFString::wrap_under_get_rule(keys[i] as CFStringRef) }.to_string());
     }
     results
 }
@@ -229,17 +316,20 @@ fn get_string_from_dict(dict: &CFDictionary, key: &str) -> String {
     }
 }
 
-fn get_i32_from_dict(dict: &CFDictionary, key: &str) -> i32 {
+fn get_num_from_dict<T>(dict: &CFDictionary, key: &str) -> T
+where
+    T: Default,
+{
     let key = CFString::new(key);
     let value = match dict.find(key.to_void()) {
         Some(n) => n,
-        None => return 0,
+        None => return T::default(),
     };
 
-    let mut value_i32 = 0_i32;
-    let out_value: *mut i32 = &mut value_i32;
+    let mut result: T = T::default();
+    let out_value: *mut T = &mut result;
     unsafe { CFNumberGetValue(*value as CFNumberRef, kCFNumberSInt32Type, out_value.cast()) };
-    value_i32
+    result
 }
 
 fn get_dict_from_dict(dict: &CFDictionary, key: &str) -> Option<CFDictionary> {
@@ -251,9 +341,10 @@ fn get_dict_from_dict(dict: &CFDictionary, key: &str) -> Option<CFDictionary> {
     Some(unsafe { CFDictionary::wrap_under_get_rule(*value as CFDictionaryRef) })
 }
 
-fn adjusted_bounds(window_bounds: &Rect, screens: &Vec<ScreenLayout>) -> (CGDirectDisplayID, Rect) {
+// Convert absolute window pos to one that's relative to the screen the window is on.
+fn relative_bounds(window_bounds: &Rect, screens: &Vec<ScreenInfo>) -> (CGDirectDisplayID, Rect) {
     for screen in screens {
-        if screen.frame.contains(&window_bounds) {
+        if screen.frame.contains_origin(window_bounds) {
             return (
                 screen.id,
                 Rect {
@@ -277,52 +368,105 @@ fn adjusted_bounds(window_bounds: &Rect, screens: &Vec<ScreenLayout>) -> (CGDire
     )
 }
 
-// From https://github.com/hahnlee/canter
-#[allow(unused)]
-fn string_ref_to_string(string_ref: CFStringRef) -> String {
-    // reference: https://github.com/servo/core-foundation-rs/blob/355740/core-foundation/src/string.rs#L49
-    unsafe {
-        let char_ptr = CFStringGetCStringPtr(string_ref, kCFStringEncodingUTF8);
-        if !char_ptr.is_null() {
-            let c_str = CStr::from_ptr(char_ptr);
-            return String::from(c_str.to_str().unwrap());
+// Convert absolute window pos to one that's relative to the screen the window is on.
+fn absolute_bounds(window_bounds: &Rect, screen_num: usize, screens: &Vec<ScreenInfo>) -> Rect {
+    let screen: &ScreenInfo = screens
+        .get(screen_num - 1)
+        .unwrap_or(screens.get(0).unwrap());
+
+    Rect {
+        x: window_bounds.x + screen.frame.x,
+        y: window_bounds.y + screen.frame.y,
+        w: window_bounds.w,
+        h: window_bounds.h,
+    }
+}
+
+fn nearest_screen(desired_bounds: &Rect, screens: &Vec<ScreenInfo>) -> usize {
+    for i in 0..screens.len() {
+        if screens[i].frame.contains_origin(desired_bounds) {
+            return i;
+        }
+    }
+    0
+}
+
+//
+// One complication here is that we have to enumerate all desktop windows using the CGWindowList API,
+// and yet we have to use an entirely different API (the Accessibility API) to actually move the
+// windows. (There's no way to enumerate all desktop windows with the Accessibility API -- well,
+// at least not easily).
+//
+fn get_axwindow(owner_id: i32, window_id: u32) -> anyhow::Result<AXUIElementRef> {
+    let ax_application = unsafe {
+        AXUIElementCreateApplication(owner_id as i32 /*pid_t is private, sigh*/)
+    };
+    let mut windows_ref: CFTypeRef = std::ptr::null();
+
+    if ax_application.is_null() {
+        return Err(anyhow!("Failed to get AXUI application handle."));
+    }
+
+    if unsafe {
+        AXUIElementCopyAttributeValue(
+            ax_application,
+            CFString::new(kAXWindowsAttribute).as_concrete_TypeRef(),
+            &mut windows_ref as *mut CFTypeRef,
+        )
+    } != kAXErrorSuccess
+    {
+        unsafe {
+            CFRelease(ax_application.cast());
         }
 
-        let char_len = CFStringGetLength(string_ref);
-
-        let mut bytes_required: CFIndex = 0;
-        CFStringGetBytes(
-            string_ref,
-            CFRange {
-                location: 0,
-                length: char_len,
-            },
-            kCFStringEncodingUTF8,
-            0,
-            false as Boolean,
-            std::ptr::null_mut(),
-            0,
-            &mut bytes_required,
-        );
-
-        // Then, allocate the buffer and actually copy.
-        let mut buffer = vec![b'\x00'; bytes_required as usize];
-
-        let mut bytes_used: CFIndex = 0;
-        CFStringGetBytes(
-            string_ref,
-            CFRange {
-                location: 0,
-                length: char_len,
-            },
-            kCFStringEncodingUTF8,
-            0,
-            false as Boolean,
-            buffer.as_mut_ptr(),
-            buffer.len() as CFIndex,
-            &mut bytes_used,
-        );
-
-        return String::from_utf8_unchecked(buffer);
+        return Err(anyhow!("Failed to get AXUI application attribute."));
     }
+
+    if windows_ref.is_null() {
+        unsafe {
+            CFRelease(windows_ref.cast());
+            CFRelease(ax_application.cast());
+        }
+
+        return Err(anyhow!("Failed to get AXUI application attribute."));
+    }
+
+    let windows_nsarray = windows_ref as id;
+
+    let count = unsafe { NSArray::count(windows_nsarray) };
+
+    for i in 0..count {
+        let ax_window = unsafe { NSArray::objectAtIndex(windows_nsarray, i) };
+
+        let ax_window_id = {
+            let mut id: CGWindowID = 0;
+            if unsafe { _AXUIElementGetWindow(ax_window as AXUIElementRef, &mut id) }
+                != kAXErrorSuccess
+            {
+                continue;
+            }
+            id
+        };
+
+        if ax_window_id == window_id {
+            unsafe {
+                CFRetain(ax_window.cast());
+                CFRelease(windows_ref.cast());
+                CFRelease(ax_application.cast());
+            }
+
+            return Ok(ax_window as AXUIElementRef);
+        }
+    }
+
+    unsafe {
+        CFRelease(windows_ref.cast());
+        CFRelease(ax_application.cast());
+    }
+
+    Err(anyhow!("Window not found"))
+}
+
+extern "C" {
+    pub fn _AXUIElementGetWindow(element: AXUIElementRef, out: *mut CGWindowID) -> AXError;
 }
