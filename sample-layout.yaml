@@ -1,0 +1,74 @@
+# These are the screens that were attached when this layout was saved. Layout will attempt to restore each window to the
+# appropriate monitor even if the monitor arrangement has changed.
+screens:
+  - id: 1
+    frame: 0,0,1728,1117
+  - id: 2
+    frame: 1728,0,1920,1080
+  - id: 3
+    frame: -1920,0,1920,1080
+# Now a list of windows and their desired placement.
+windows:
+  # Can use regular expressions in both the owner_name and the name field.
+  # The regular expression syntax is that of the Rust Regex class.
+  # See https://docs.rs/regex/latest/regex/#syntax
+  - owner_name: (RustRover-EAP)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+    name: .* – .*
+    screen_num: 3
+    bounds: 0,25,1920,1055
+  - owner_name: (RustRover-EAP)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+    name: Build
+    screen_num: 2
+    bounds: 0,336,1646,399
+  - owner_name: (RustRover-EAP)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+    name: Debug
+    screen_num: 2
+    bounds: 0,631,1646,458
+  - owner_name: (RustRover-EAP)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+    name: Find
+    screen_num: 2
+    bounds: 0,400,1646,458
+  - owner_name: (RustRover-EAP)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+    name: Run
+    screen_num: 2
+    bounds: 0,25,1646,482
+  - owner_name: Firefox
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
+  - owner_name: Google Chrome
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
+  - owner_name: Messages
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
+  - owner_name: Microsoft Edge Dev
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
+  - owner_name: Microsoft OneNote
+    name: .*
+    screen_num: 1
+    bounds: 28,38,1646,1009
+  - owner_name: Microsoft Outlook
+    name: .*
+    screen_num: 2
+    bounds: 0,34,1920,985
+  - owner_name: Music
+    name: Music
+    screen_num: 2
+    bounds: 64,97,1571,873
+  - owner_name: Slack
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
+  - owner_name: SmartGit
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
+  - owner_name: Terminal
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1705,995

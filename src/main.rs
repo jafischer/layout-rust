@@ -21,7 +21,7 @@ use core_graphics::display;
 use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGWindowID};
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
-use log::{debug, error, trace};
+use log::{debug, error, trace, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
 use objc::msg_send;
@@ -36,13 +36,13 @@ mod layout_types;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Save the current layout (prints to stdout). If not specified, then the layout in ~/.layout.json will be loaded.
+    /// Save the current layout (prints to stdout). If not specified, then the layout in ~/.layout.yaml will be loaded.
     #[arg(short, long)]
     save: bool,
 
-    /// Enable debug logging.
-    #[arg(short, long)]
-    debug: bool,
+    /// Logging level. Default: Info. Valid values: Off, Error, Warn, Info, Debug, Trace,
+    #[arg(short, long, default_value = "Info")]
+    log_level: LevelFilter,
 }
 
 const MIN_WIDTH: i32 = 64;
@@ -51,7 +51,7 @@ const MIN_HEIGHT: i32 = 64;
 fn main() {
     let args = Args::parse();
 
-    initialize_logging(args.debug);
+    initialize_logging(args.log_level);
 
     if args.save {
         save_layout();
@@ -60,18 +60,14 @@ fn main() {
     }
 }
 
-fn initialize_logging(debug: bool) {
+fn initialize_logging(log_level: LevelFilter) {
     let log_appender = Appender::builder().build(
         "stdout".to_string(),
         Box::new(ConsoleAppender::builder().target(Target::Stderr).build()),
     );
     let log_root = Root::builder()
         .appender("stdout".to_string())
-        .build(if debug {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        });
+        .build(log_level);
     let log_config = log4rs::config::Config::builder()
         .appender(log_appender)
         .build(log_root);
@@ -81,25 +77,17 @@ fn initialize_logging(debug: bool) {
 }
 
 fn save_layout() {
-    let layout = get_layout();
+    let layout = get_current_layout();
 
-    println!("{}", serde_json::to_string_pretty(&layout).unwrap());
+    println!("{}", serde_yaml::to_string(&layout).unwrap());
 }
 
 fn restore_layout() {
-    let home = env!("HOME");
-    let path = format!("{}/.layout.json", home);
-
-    let file = File::open(&path).expect(&format!("Failed to open {}", path));
-    let reader = BufReader::new(file);
-
-    let desired_layout: Layout =
-        serde_json::from_reader(reader).expect(&format!("Failed to parse JSON file {}", path));
-
-    let current_layout = get_layout();
+    let desired_layout = load_layout_file();
+    let current_layout = get_current_layout();
 
     for window_info in current_layout.windows {
-        // This is O(n) and thus the entire loop is basically O(n^2) but whatevs.
+        // Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
         // We're talking dozens, not millions.
         if let Some(desired_window_info) = desired_layout
             .windows
@@ -133,70 +121,95 @@ fn restore_layout() {
             // Rather than checking for equality, check for "within a couple of pixels" because I've found
             // that after moving, the window coords don't always exactly match what I sent.
             if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
-                debug!(
-                    "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
-                    window_info.owner_name,
-                    window_info.name,
+                move_window(
+                    &window_info,
                     current_absolute_bounds,
-                    desired_absolute_bounds
+                    desired_absolute_bounds,
                 );
-
-                for ids in window_info.ids {
-                    if let Ok(axwindow) = get_axwindow(ids.process_id, ids.window_id) {
-                        debug!(
-                            "Found axwindow for {:?}/{:?}/{:?}/{:?}",
-                            window_info.owner_name, window_info.name, ids.process_id, ids.window_id
-                        );
-
-                        let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
-                        let position = unsafe {
-                            AXValueCreate(
-                                kAXValueTypeCGPoint,
-                                // What a masterpiece of ugliness:
-                                &mut cg_pos as *mut _ as *mut c_void,
-                            )
-                        };
-                        let result = unsafe {
-                            AXUIElementSetAttributeValue(
-                                axwindow,
-                                CFString::new(kAXPositionAttribute).as_concrete_TypeRef(),
-                                position as _,
-                            )
-                        };
-                        if result != kAXErrorSuccess {
-                            error!(
-                                "AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}",
-                                result
-                            );
-                            continue;
-                        }
-
-                        let mut cg_size: CGSize = desired_absolute_bounds.size();
-                        let size = unsafe {
-                            AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void)
-                        };
-
-                        let result = unsafe {
-                            AXUIElementSetAttributeValue(
-                                axwindow,
-                                CFString::new(kAXSizeAttribute).as_concrete_TypeRef(),
-                                size as _,
-                            )
-                        };
-                        if result != kAXErrorSuccess {
-                            error!(
-                                "AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}",
-                                result
-                            );
-                        }
-                    }
-                }
+            } else {
+                debug!(
+                    "No need to be move {:?}/{:?}",
+                    window_info.owner_name, window_info.name
+                );
             }
         }
     }
 }
 
-fn get_layout() -> Layout {
+fn move_window(
+    window_info: &WindowInfo,
+    current_absolute_bounds: Rect,
+    desired_absolute_bounds: Rect,
+) {
+    debug!(
+        "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
+        window_info.owner_name, window_info.name, current_absolute_bounds, desired_absolute_bounds
+    );
+
+    for ids in &window_info.ids {
+        if let Ok(axwindow) = get_axwindow(ids.process_id, ids.window_id) {
+            debug!(
+                "Found axwindow for {:?}/{:?}/{:?}/{:?}",
+                window_info.owner_name, window_info.name, ids.process_id, ids.window_id
+            );
+
+            let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
+            let position = unsafe {
+                AXValueCreate(
+                    kAXValueTypeCGPoint,
+                    // What a masterpiece of ugliness:
+                    &mut cg_pos as *mut _ as *mut c_void,
+                )
+            };
+            let result = unsafe {
+                AXUIElementSetAttributeValue(
+                    axwindow,
+                    CFString::new(kAXPositionAttribute).as_concrete_TypeRef(),
+                    position as _,
+                )
+            };
+            if result != kAXErrorSuccess {
+                error!(
+                    "AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}",
+                    result
+                );
+                continue;
+            }
+
+            let mut cg_size: CGSize = desired_absolute_bounds.size();
+            let size =
+                unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
+
+            let result = unsafe {
+                AXUIElementSetAttributeValue(
+                    axwindow,
+                    CFString::new(kAXSizeAttribute).as_concrete_TypeRef(),
+                    size as _,
+                )
+            };
+            if result != kAXErrorSuccess {
+                error!(
+                    "AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}",
+                    result
+                );
+            }
+        }
+    }
+}
+
+fn load_layout_file() -> Layout {
+    let home = env!("HOME");
+    let path = format!("{}/.layout.yaml", home);
+
+    let file = File::open(&path).expect(&format!("Failed to open {}", path));
+    let reader = BufReader::new(file);
+
+    let desired_layout: Layout =
+        serde_yaml::from_reader(reader).expect(&format!("Failed to parse layout file {}", path));
+    desired_layout
+}
+
+fn get_current_layout() -> Layout {
     let screens = get_screens();
     let windows = get_windows(&screens);
     Layout { screens, windows }
@@ -320,7 +333,7 @@ fn get_screens() -> Vec<ScreenInfo> {
             let frame = screen.frame();
 
             // I'm going to convert all NSScreen coords (which are bizarrely reversed in the Y axis) to the
-            // same as window coords.
+            // same orientation as window coords.
             let fixed_y = primary_frame.size.height - frame.size.height - frame.origin.y;
 
             let device_desc = screen.deviceDescription();

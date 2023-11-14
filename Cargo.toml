@@ -32,4 +32,4 @@ objc = "0.2.7"
 
 regex = "1.10.2"
 serde = "1.0.192"
-serde_json = "1.0.108"
+serde_yaml = "0.9.27"
