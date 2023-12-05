@@ -109,12 +109,12 @@ fn restore_layout() {
 
             let current_absolute_bounds = absolute_bounds(
                 &window_info.bounds,
-                window_info.screen_num,
+                &current_layout.screens[window_info.screen_num - 1],
                 &current_layout.screens,
             );
             let desired_absolute_bounds = absolute_bounds(
                 &desired_window_info.bounds,
-                desired_window_info.screen_num,
+                &desired_layout.screens[desired_window_info.screen_num - 1],
                 &current_layout.screens,
             );
 
@@ -398,6 +398,21 @@ fn get_dict_from_dict(dict: &CFDictionary, key: &str) -> Option<CFDictionary> {
     Some(unsafe { CFDictionary::wrap_under_get_rule(*value as CFDictionaryRef) })
 }
 
+fn closest_screen(desired_screen: &ScreenInfo, current_screens: &Vec<ScreenInfo>) -> ScreenInfo {
+    if let Some(closest_screen) = current_screens.iter().min_by(|screen1, screen2| {
+        let dist1 = (screen1.frame.x - desired_screen.frame.x).abs()
+            + (screen1.frame.y - desired_screen.frame.y).abs();
+        let dist2 = (screen2.frame.x - desired_screen.frame.x).abs()
+            + (screen2.frame.y - desired_screen.frame.y).abs();
+
+        dist1.cmp(&dist2)
+    }) {
+        closest_screen.clone()
+    } else {
+        current_screens[0].clone()
+    }
+}
+
 // Convert absolute window pos to one that's relative to the screen the window is on.
 fn relative_bounds(window_bounds: &Rect, screens: &Vec<ScreenInfo>) -> (CGDirectDisplayID, Rect) {
     for screen in screens {
@@ -426,10 +441,12 @@ fn relative_bounds(window_bounds: &Rect, screens: &Vec<ScreenInfo>) -> (CGDirect
 }
 
 // Convert absolute window pos to one that's relative to the screen the window is on.
-fn absolute_bounds(window_bounds: &Rect, screen_num: usize, screens: &Vec<ScreenInfo>) -> Rect {
-    let screen: &ScreenInfo = screens
-        .get(screen_num - 1)
-        .unwrap_or(screens.get(0).unwrap());
+fn absolute_bounds(
+    window_bounds: &Rect,
+    screen_info: &ScreenInfo,
+    screens: &Vec<ScreenInfo>,
+) -> Rect {
+    let screen = closest_screen(&screen_info, &screens);
 
     Rect {
         x: window_bounds.x + screen.frame.x,
