@@ -1,3 +1,4 @@
+use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
 use crate::idref::IdRef;
 use crate::layout_types::MaybeRegex::Exact;
 use crate::layout_types::WindowIds;
@@ -7,16 +8,15 @@ use accessibility_sys::{
     AXUIElementCreateApplication, AXUIElementRef, AXUIElementSetAttributeValue, AXValueCreate,
 };
 use anyhow::anyhow;
+use args::Args;
 use clap::Parser;
 use cocoa::appkit::NSScreen;
 use cocoa_foundation::base::{id, nil};
 use cocoa_foundation::foundation::{NSArray, NSFastEnumeration, NSString, NSUInteger};
 use core_foundation::base::*;
 use core_foundation::dictionary::CFDictionary;
-use core_foundation::number::*;
 use core_foundation::string::*;
 use core_foundation_sys::dictionary::CFDictionaryRef;
-use core_foundation_sys::string::CFStringRef;
 use core_graphics::display;
 use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGWindowID};
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
@@ -24,30 +24,27 @@ use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
 use log::{debug, error, trace, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
-use objc::msg_send;
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::BufReader;
 
+#[macro_use]
+extern crate objc;
+
+extern "C" {
+    pub fn _AXUIElementGetWindow(element: AXUIElementRef, out: *mut CGWindowID) -> AXError;
+}
+
+mod args;
+mod dict_utils;
 mod idref;
 mod layout_types;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Save the current layout (prints to stdout). If not specified, then the layout in ~/.layout.yaml will be loaded.
-    #[arg(short, long)]
-    save: bool,
-
-    /// Logging level. Default: Info. Valid values: Off, Error, Warn, Info, Debug, Trace,
-    #[arg(short, long, default_value = "Info")]
-    log_level: LevelFilter,
-}
 
 const MIN_WIDTH: i32 = 64;
 const MIN_HEIGHT: i32 = 64;
 
+/// See args.rs for command line arguments.
 fn main() {
     let args = Args::parse();
 
@@ -60,6 +57,8 @@ fn main() {
     }
 }
 
+/// Initialize the logging. Logging goes to stderr, so as not to interfere with the layout output when
+/// --save is specified.
 fn initialize_logging(log_level: LevelFilter) {
     let log_appender = Appender::builder().build(
         "stdout".to_string(),
@@ -76,18 +75,22 @@ fn initialize_logging(log_level: LevelFilter) {
     log4rs::config::init_config(log_config.unwrap()).unwrap();
 }
 
+/// Enumerate the current screens and windows, and dump to stdout.
 fn save_layout() {
     let layout = get_current_layout();
 
     println!("{}", serde_yaml::to_string(&layout).unwrap());
 }
 
+/// Load the desired layout, and move all matching windows to their desired position.
 fn restore_layout() {
     let desired_layout = load_layout_file();
     let current_layout = get_current_layout();
 
     for window_info in current_layout.windows {
-        // Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
+        // See if there's a match for the Owner + Window names in the desired layout.
+        //
+        // Note: Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
         // We're talking dozens, not millions.
         if let Some(desired_window_info) = desired_layout
             .windows
@@ -107,6 +110,7 @@ fn restore_layout() {
                 desired_window_info.bounds
             );
 
+            // Now compare the current position with the desired position to see if we need to move the window.
             let current_absolute_bounds = absolute_bounds(
                 &window_info.bounds,
                 &current_layout.screens[window_info.screen_num - 1],
@@ -121,11 +125,15 @@ fn restore_layout() {
             // Rather than checking for equality, check for "within a couple of pixels" because I've found
             // that after moving, the window coords don't always exactly match what I sent.
             if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
-                move_window(
-                    &window_info,
+                debug!(
+                    "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
+                    window_info.owner_name,
+                    window_info.name,
                     current_absolute_bounds,
-                    desired_absolute_bounds,
+                    desired_absolute_bounds
                 );
+
+                move_window(&window_info, desired_absolute_bounds);
             } else {
                 debug!(
                     "No need to be move {:?}/{:?}",
@@ -136,21 +144,15 @@ fn restore_layout() {
     }
 }
 
-fn move_window(
-    window_info: &WindowInfo,
-    current_absolute_bounds: Rect,
-    desired_absolute_bounds: Rect,
-) {
-    debug!(
-        "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
-        window_info.owner_name, window_info.name, current_absolute_bounds, desired_absolute_bounds
-    );
-
+fn move_window(window_info: &WindowInfo, desired_absolute_bounds: Rect) {
     for ids in &window_info.ids {
         if let Ok(axwindow) = get_axwindow(ids.process_id, ids.window_id) {
-            debug!(
+            trace!(
                 "Found axwindow for {:?}/{:?}/{:?}/{:?}",
-                window_info.owner_name, window_info.name, ids.process_id, ids.window_id
+                window_info.owner_name,
+                window_info.name,
+                ids.process_id,
+                ids.window_id
             );
 
             let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
@@ -209,6 +211,39 @@ fn load_layout_file() -> Layout {
     desired_layout
 }
 
+fn get_screens() -> Vec<ScreenInfo> {
+    let mut screens = Vec::new();
+
+    unsafe {
+        let ns_screens = NSScreen::screens(nil);
+        let primary_screen = NSScreen::mainScreen(nil);
+        let primary_frame = primary_screen.frame();
+        let screen_num_key = IdRef::new(NSString::alloc(nil).init_str("NSScreenNumber"));
+
+        for screen in ns_screens.iter() {
+            let frame = screen.frame();
+
+            // I'm going to convert all NSScreen coords (which are bizarrely reversed in the Y axis) to the
+            // same orientation as window coords.
+            let fixed_y = primary_frame.size.height - frame.size.height - frame.origin.y;
+
+            let device_desc = screen.deviceDescription();
+            let value: id = msg_send![device_desc, objectForKey:*screen_num_key];
+            let value: NSUInteger = msg_send![value, unsignedIntegerValue];
+            screens.push(ScreenInfo {
+                id: value as u32,
+                frame: Rect {
+                    x: frame.origin.x as i32,
+                    y: fixed_y as i32,
+                    w: frame.size.width as i32,
+                    h: frame.size.height as i32,
+                },
+            });
+        }
+    }
+    screens
+}
+
 fn get_current_layout() -> Layout {
     let screens = get_screens();
     let windows = get_windows(&screens);
@@ -246,12 +281,6 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
             unsafe { CFDictionary::wrap_under_get_rule(*cg_window_info as CFDictionaryRef) };
 
         let mut window_info = WindowInfo::default();
-
-        // debug!("Window keys: {:?}", get_dict_keys(&window_dict));
-        // Window keys:
-        // ["kCGWindowLayer", "kCGWindowAlpha", "kCGWindowMemoryUsage", "kCGWindowIsOnscreen",
-        // "kCGWindowSharingState", "kCGWindowOwnerPID", "kCGWindowNumber", "kCGWindowOwnerName",
-        // "kCGWindowStoreType", "kCGWindowBounds", "kCGWindowName"]
 
         let owner_name = get_string_from_dict(&window_dict, "kCGWindowOwnerName");
         let window_name = get_string_from_dict(&window_dict, "kCGWindowName");
@@ -315,87 +344,6 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
                 .collect::<Vec<WindowInfo>>()
         })
         .collect()
-}
-
-#[macro_use]
-extern crate objc;
-
-fn get_screens() -> Vec<ScreenInfo> {
-    let mut screens = Vec::new();
-
-    unsafe {
-        let ns_screens = NSScreen::screens(nil);
-        let primary_screen = NSScreen::mainScreen(nil);
-        let primary_frame = primary_screen.frame();
-        let screen_num_key = IdRef::new(NSString::alloc(nil).init_str("NSScreenNumber"));
-
-        for screen in ns_screens.iter() {
-            let frame = screen.frame();
-
-            // I'm going to convert all NSScreen coords (which are bizarrely reversed in the Y axis) to the
-            // same orientation as window coords.
-            let fixed_y = primary_frame.size.height - frame.size.height - frame.origin.y;
-
-            let device_desc = screen.deviceDescription();
-            let value: id = msg_send![device_desc, objectForKey:*screen_num_key];
-            let value: NSUInteger = msg_send![value, unsignedIntegerValue];
-            screens.push(ScreenInfo {
-                id: value as u32,
-                frame: Rect {
-                    x: frame.origin.x as i32,
-                    y: fixed_y as i32,
-                    w: frame.size.width as i32,
-                    h: frame.size.height as i32,
-                },
-            });
-        }
-    }
-    screens
-}
-
-#[allow(unused)]
-fn get_dict_keys(dict: &CFDictionary) -> Vec<String> {
-    let (keys, values) = dict.get_keys_and_values();
-    let length = dict.len();
-
-    let mut results = Vec::new();
-    for i in 0..length {
-        results.push(unsafe { CFString::wrap_under_get_rule(keys[i] as CFStringRef) }.to_string());
-    }
-    results
-}
-
-fn get_string_from_dict(dict: &CFDictionary, key: &str) -> String {
-    let key = CFString::new(key);
-    match dict.find(key.to_void()) {
-        Some(value) => unsafe { CFString::wrap_under_get_rule(*value as CFStringRef) }.to_string(),
-        None => return String::new(),
-    }
-}
-
-fn get_num_from_dict<T>(dict: &CFDictionary, key: &str) -> T
-where
-    T: Default,
-{
-    let key = CFString::new(key);
-    let value = match dict.find(key.to_void()) {
-        Some(n) => n,
-        None => return T::default(),
-    };
-
-    let mut result: T = T::default();
-    let out_value: *mut T = &mut result;
-    unsafe { CFNumberGetValue(*value as CFNumberRef, kCFNumberSInt32Type, out_value.cast()) };
-    result
-}
-
-fn get_dict_from_dict(dict: &CFDictionary, key: &str) -> Option<CFDictionary> {
-    let key = CFString::new(key);
-    let value = match dict.find(key.to_void()) {
-        Some(n) => n,
-        None => return None,
-    };
-    Some(unsafe { CFDictionary::wrap_under_get_rule(*value as CFDictionaryRef) })
 }
 
 fn closest_screen(desired_screen: &ScreenInfo, current_screens: &Vec<ScreenInfo>) -> ScreenInfo {
@@ -528,8 +476,4 @@ fn get_axwindow(owner_id: i32, window_id: u32) -> anyhow::Result<AXUIElementRef>
     }
 
     Err(anyhow!("Window not found"))
-}
-
-extern "C" {
-    pub fn _AXUIElementGetWindow(element: AXUIElementRef, out: *mut CGWindowID) -> AXError;
 }
