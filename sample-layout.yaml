@@ -7,28 +7,32 @@ screens:
     frame: 1728,0,1920,1080
   - id: 3
     frame: -1920,0,1920,1080
+
 # Now a list of windows and their desired placement.
 windows:
   # Can use regular expressions in both the owner_name and the name field.
   # The regular expression syntax is that of the Rust Regex class.
   # See https://docs.rs/regex/latest/regex/#syntax
-  - owner_name: (RustRover)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+
+  # I use several different JetBrains IDEs, and I want them all to be arranged the same.
+  # I also personally like to have the Run, Debug, Find and Build views in floating mode, on separate monitors.
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
     name: .* – .*
     screen_num: 3
     bounds: 0,25,1920,1055
-  - owner_name: (RustRover)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
     name: Build
     screen_num: 2
     bounds: 0,246,1646,399
-  - owner_name: (RustRover)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
     name: Debug
     screen_num: 2
     bounds: 0,646,1646,458
-  - owner_name: (RustRover)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
     name: Find
     screen_num: 2
     bounds: 0,400,1646,458
-  - owner_name: (RustRover)|(CLion)|(IntelliJ IDEA)|(PyCharm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
     name: Run
     screen_num: 2
     bounds: 0,25,1646,482
