@@ -5,13 +5,12 @@
 ---
 ## Background
 
-Let's face it, MacBooks are not great at managing multiple monitors, at least in the
-scenario where you are regularly unplugging them and plugging them back in.
+I have a very particular preference for how my application windows are laid out on my Macbook. 
+Outlook goes _here_, all my IDE windows go _here_, and so on. 
 
-When you come back from a meeting, and plug in your 2nd (and maybe 3rd) monitor,
-your MacBook **tries** to remember where all the windows used to be, and put them all back.
-But -- at least in my case, where I have a very particular preference for how my
-applications' windows are arranged -- it fails miserably.
+MacOS tries to remember where things go, but let's face it, it doesn't do a terribly good job,
+especially in the scenario where you are regularly disconnecting and reconnecting your external
+monitors.
 
 Hence this app. I wrote it because I once wrote a similar app for Windows, and I was
 curious how hard it would be to write one for MacOS (spoiler alert: way harder).
@@ -25,18 +24,22 @@ worked, and I used it happily for almost 5 years.
 
 Then came MacOS Sonoma, which broke Layout for... reasons, that I now needed to figure out. By now I no
 longer had any interest in Swift, but over the past year or so had become completely enamored with Rust...
-So I decided to give it a try in Rust, since I saw that there was at least a set of FFI bindings for Cocoa.
 
-Using FFI is unpleasant, as your code ends up sprinkled with a bunch of `unsafe` blocks; I'd much prefer that
-to be hidden in a library that exposed a native Rust interface. But it works.
+It uses the [FFI bindings for Cocoa](https://crates.io/crates/cocoa), which... yuck. Your code ends up
+sprinkled with a bunch of `unsafe` blocks; it would be great to have all that hidden away in a library
+that exposed a nice idiomatic Rust interface. But... it works.
 
 ## Instructions
 
-1. Arrange your application windows in the way you want to preserve.
+1. Arrange your application windows for maximum viewing pleasure.
 2. Run `layout --save > ~/.layout.yaml`
 3. Edit the file to
    - remove windows you don't care about
    - optionally use regular expressions to handle windows whose titles change depending on which file is
      opened, say (such as IDEs).<br>
+4. Now run `layout` with no arguments to restore your layout.
+5. Even better, install [Alfred](https://www.alfredapp.com/) and
+   [set up a simple workflow](https://www.alfredapp.com/workflows/) that launches Layout when
+   you press a shortcut key (I use `Ctrl+Cmd+L`).
 
 See [sample-layout.yaml](./sample-layout.yaml) for an example.
