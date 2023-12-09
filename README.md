@@ -36,4 +36,7 @@ to be hidden in a library that exposed a native Rust interface. But it works.
 2. Run `layout --save > ~/.layout.yaml`
 3. Edit the file to
    - remove windows you don't care about
-   - optionally use wildcards to handle windows whose titles  
+   - optionally use regular expressions to handle windows whose titles change depending on which file is
+     opened, say (such as IDEs).<br>
+
+See [sample-layout.yaml](./sample-layout.yaml) for an example.
