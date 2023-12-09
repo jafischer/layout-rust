@@ -3,6 +3,7 @@ use core_graphics_types::base::CGFloat;
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Layout {
@@ -21,9 +22,11 @@ pub struct WindowInfo {
     pub owner_name: MaybeRegex,
     pub name: MaybeRegex,
     // For our purposes we want to move every window that has the same Owner Name + Name to the same position. So
-    // we need to keep track of the process_id + window_id of all matching windows.
+    // we need to keep track of the process_id, window_id and position of all matching windows.
+    // But we don't need to store this info when saving the current layout; hence
+    // the `skip_serializing, skip_deserializing`.
     #[serde(skip_serializing, skip_deserializing)]
-    pub ids: Vec<WindowIds>,
+    pub matching_windows: Vec<MatchingWindowInfo>,
     pub screen_num: usize,
     pub bounds: Rect,
 }
@@ -37,9 +40,14 @@ pub struct Rect {
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct WindowIds {
+pub struct MatchingWindowInfo {
     pub process_id: i32,
     pub window_id: u32,
+    // We also store a copy of the window position here, because in the "save" case we'll just save a single
+    // position to the output file, but in the "restore" case we need to know the position of each window with
+    // the same owner & window names.
+    pub screen_num: usize,
+    pub bounds: Rect,
 }
 
 impl WindowInfo {
@@ -66,12 +74,13 @@ impl MaybeRegex {
     }
 }
 
-impl ToString for MaybeRegex {
-    fn to_string(&self) -> String {
-        match self {
+impl Display for MaybeRegex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
             Exact(value) => value.clone(),
             RE(value) => value.as_str().to_string(),
-        }
+        };
+        write!(f, "{}", str)
     }
 }
 

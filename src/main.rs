@@ -1,7 +1,7 @@
 use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
 use crate::idref::IdRef;
+use crate::layout_types::MatchingWindowInfo;
 use crate::layout_types::MaybeRegex::Exact;
-use crate::layout_types::WindowIds;
 use accessibility_sys::{
     kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint,
     kAXValueTypeCGSize, kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue,
@@ -110,91 +110,101 @@ fn restore_layout() {
                 desired_window_info.bounds
             );
 
-            // Now compare the current position with the desired position to see if we need to move the window.
-            let current_absolute_bounds = absolute_bounds(
-                &window_info.bounds,
-                &current_layout.screens[window_info.screen_num - 1],
-                &current_layout.screens,
-            );
-            let desired_absolute_bounds = absolute_bounds(
-                &desired_window_info.bounds,
-                &desired_layout.screens[desired_window_info.screen_num - 1],
-                &current_layout.screens,
-            );
-
-            // Rather than checking for equality, check for "within a couple of pixels" because I've found
-            // that after moving, the window coords don't always exactly match what I sent.
-            if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
-                debug!(
-                    "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
-                    window_info.owner_name,
-                    window_info.name,
-                    current_absolute_bounds,
-                    desired_absolute_bounds
+            for matching_window in &window_info.matching_windows {
+                // Now compare the current position with the desired position to see if we need to move the window.
+                let current_absolute_bounds = absolute_bounds(
+                    &matching_window.bounds,
+                    &current_layout.screens[matching_window.screen_num - 1],
+                    &current_layout.screens,
+                );
+                let desired_absolute_bounds = absolute_bounds(
+                    &desired_window_info.bounds,
+                    &desired_layout.screens[desired_window_info.screen_num - 1],
+                    &current_layout.screens,
                 );
 
-                move_window(&window_info, desired_absolute_bounds);
-            } else {
-                debug!(
-                    "No need to be move {:?}/{:?}",
-                    window_info.owner_name, window_info.name
-                );
+                // Rather than checking for equality, check for "within a couple of pixels" because I've found
+                // that after moving, the window coords don't always exactly match what I sent.
+                if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
+                    debug!(
+                        "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
+                        window_info.owner_name,
+                        window_info.name,
+                        current_absolute_bounds,
+                        desired_absolute_bounds
+                    );
+
+                    move_window(&window_info, matching_window, desired_absolute_bounds);
+                } else {
+                    debug!(
+                        "No need to be move {:?}/{:?}",
+                        window_info.owner_name, window_info.name
+                    );
+                }
             }
+        } else {
+            trace!(
+                "No match for {:?}/{:?}",
+                window_info.owner_name,
+                window_info.name
+            );
         }
     }
 }
 
-fn move_window(window_info: &WindowInfo, desired_absolute_bounds: Rect) {
-    for ids in &window_info.ids {
-        if let Ok(axwindow) = get_axwindow(ids.process_id, ids.window_id) {
-            trace!(
-                "Found axwindow for {:?}/{:?}/{:?}/{:?}",
-                window_info.owner_name,
-                window_info.name,
-                ids.process_id,
-                ids.window_id
+fn move_window(
+    window_info: &WindowInfo,
+    matching_window: &MatchingWindowInfo,
+    desired_absolute_bounds: Rect,
+) {
+    if let Ok(axwindow) = get_axwindow(matching_window.process_id, matching_window.window_id) {
+        trace!(
+            "Found axwindow for {:?}/{:?}/{:?}/{:?}",
+            window_info.owner_name,
+            window_info.name,
+            matching_window.process_id,
+            matching_window.window_id
+        );
+
+        let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
+        let position = unsafe {
+            AXValueCreate(
+                kAXValueTypeCGPoint,
+                // What a masterpiece of ugliness:
+                &mut cg_pos as *mut _ as *mut c_void,
+            )
+        };
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                axwindow,
+                CFString::new(kAXPositionAttribute).as_concrete_TypeRef(),
+                position as _,
+            )
+        };
+        if result != kAXErrorSuccess {
+            error!(
+                "AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}",
+                result
             );
+            return;
+        }
 
-            let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
-            let position = unsafe {
-                AXValueCreate(
-                    kAXValueTypeCGPoint,
-                    // What a masterpiece of ugliness:
-                    &mut cg_pos as *mut _ as *mut c_void,
-                )
-            };
-            let result = unsafe {
-                AXUIElementSetAttributeValue(
-                    axwindow,
-                    CFString::new(kAXPositionAttribute).as_concrete_TypeRef(),
-                    position as _,
-                )
-            };
-            if result != kAXErrorSuccess {
-                error!(
-                    "AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}",
-                    result
-                );
-                continue;
-            }
+        let mut cg_size: CGSize = desired_absolute_bounds.size();
+        let size =
+            unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
 
-            let mut cg_size: CGSize = desired_absolute_bounds.size();
-            let size =
-                unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
-
-            let result = unsafe {
-                AXUIElementSetAttributeValue(
-                    axwindow,
-                    CFString::new(kAXSizeAttribute).as_concrete_TypeRef(),
-                    size as _,
-                )
-            };
-            if result != kAXErrorSuccess {
-                error!(
-                    "AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}",
-                    result
-                );
-            }
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                axwindow,
+                CFString::new(kAXSizeAttribute).as_concrete_TypeRef(),
+                size as _,
+            )
+        };
+        if result != kAXErrorSuccess {
+            error!(
+                "AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}",
+                result
+            );
         }
     }
 }
@@ -259,7 +269,8 @@ fn owners_to_ignore() -> HashSet<String> {
 }
 
 fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
-    // Use a map of maps here to get a nicely ordered list. Ordered by owner name and then name.
+    // Use a map of maps here to get a nicely ordered list. Ordered by owner name and then window name.
+    // Note
     let mut window_map: BTreeMap<String, BTreeMap<String, WindowInfo>> = BTreeMap::new();
     let owners_to_ignore = owners_to_ignore();
 
@@ -319,14 +330,18 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
         }
         let owner_map = window_map.get_mut(&owner_name).unwrap();
 
+        // There can be multiple windows with the same owner name and window name (e.g. multiple projects opened
+        // in RustRover and they each have a "Find" window open). This is why window_info.ids is a Vector.
         if let Some(matching_window_info) = owner_map.get(&window_name) {
-            window_info.ids = matching_window_info.ids.clone();
+            window_info.matching_windows = matching_window_info.matching_windows.clone();
         } else {
-            window_info.ids = Vec::new();
+            window_info.matching_windows = Vec::new();
         }
-        window_info.ids.push(WindowIds {
+        window_info.matching_windows.push(MatchingWindowInfo {
             process_id,
             window_id,
+            screen_num: display_id as usize,
+            bounds: window_info.bounds.clone(),
         });
         owner_map.insert(window_name, window_info);
     }
