@@ -17,6 +17,8 @@ windows:
   # I use several different JetBrains IDEs, and I want them all to be arranged the same.
   # I also personally like to have the Run, Debug, Find and Build views in floating mode, on separate monitors.
   - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
+    # The main Jetbrains IDE window names are of the format "project - current file",
+    # e.g. "layout-rust – sample-layout.yaml". 
     name: .* – .*
     screen_num: 3
     bounds: 0,25,1920,1055
