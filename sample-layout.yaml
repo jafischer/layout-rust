@@ -15,29 +15,34 @@ windows:
   # See https://docs.rs/regex/latest/regex/#syntax
 
   # I use several different JetBrains IDEs, and I want them all to be arranged the same.
-  # I also personally like to have the Run, Debug, Find and Build views in floating mode, on separate monitors.
-  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     # The main Jetbrains IDE window names are of the format "project - current file",
     # e.g. "layout-rust – sample-layout.yaml".
     name: .* – .*
     screen_num: 3
     bounds: 0,25,1920,1055
-  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
+  # I also personally like to have the various tool windows in floating mode, on separate monitors.
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Build
     screen_num: 2
     bounds: 0,246,1646,399
-  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Debug
     screen_num: 2
-    bounds: 0,646,1646,458
-  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
+    bounds: 0,579,1646,500
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Find
     screen_num: 2
     bounds: 0,400,1646,458
-  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Run
     screen_num: 2
     bounds: 0,25,1646,482
+  # VS Code
+  - owner_name: Code
+    name: .* - .*
+    screen_num: 2
+    bounds: 0,25,1920,1055
   - owner_name: Firefox
     name: .*
     screen_num: 1
@@ -49,8 +54,8 @@ windows:
   - owner_name: Messages
     name: .*
     screen_num: 1
-    bounds: 0,38,1728,1009
-  - owner_name: Microsoft Edge Dev
+    bounds: 300,38,1000,1009
+  - owner_name: Microsoft Edge.*
     name: .*
     screen_num: 1
     bounds: 0,38,1728,1009
@@ -84,7 +89,16 @@ windows:
     name: .* - File Compare
     screen_num: 2
     bounds: 0,25,1646,1055
+  # SmartGit Log
+  - owner_name: SmartGit
+    name: .* - Log.*
+    screen_num: 2
+    bounds: 0,25,1646,1055
   - owner_name: Terminal
     name: .*
     screen_num: 1
     bounds: 0,38,1705,995
+  - owner_name: Postman
+    name: .*
+    screen_num: 1
+    bounds: 0,38,1728,1009
