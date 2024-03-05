@@ -1,3 +1,4 @@
+use crate::args::Command;
 use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
 use crate::idref::IdRef;
 use crate::layout_types::MatchingWindowInfo;
@@ -24,6 +25,7 @@ use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
 use log::{debug, error, trace, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
+use regex::Regex;
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::c_void;
 use std::fs::File;
@@ -50,10 +52,9 @@ fn main() {
 
     initialize_logging(args.log_level);
 
-    if args.save {
-        save_layout();
-    } else {
-        restore_layout();
+    match args.command() {
+        Command::Restore => restore_layout(args.path),
+        Command::Save => save_layout(),
     }
 }
 
@@ -83,8 +84,8 @@ fn save_layout() {
 }
 
 /// Load the desired layout, and move all matching windows to their desired position.
-fn restore_layout() {
-    let desired_layout = load_layout_file();
+fn restore_layout(path: String) {
+    let desired_layout = load_layout_file(path);
     let current_layout = get_current_layout();
 
     for window_info in current_layout.windows {
@@ -209,9 +210,11 @@ fn move_window(
     }
 }
 
-fn load_layout_file() -> Layout {
-    let home = env!("HOME");
-    let path = format!("{}/.layout.yaml", home);
+fn load_layout_file(path: String) -> Layout {
+    // Don't need the portable "home" crate, because this is MacOs-only.
+    let home: String = env!("HOME").into();
+
+    let path: String = Regex::new("^~").unwrap().replace(&path, home).into();
 
     let file = File::open(&path).expect(&format!("Failed to open {}", path));
     let reader = BufReader::new(file);
