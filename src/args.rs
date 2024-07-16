@@ -6,7 +6,7 @@ use log::LevelFilter;
 /// A tool for restoring your carefully-arranged window layout on your MacBook.
 pub struct Args {
     /// Logging level. Valid values: off, error, warn, info, debug, trace.
-    #[arg(short, long, default_value = "info")]
+    #[arg(short, long, default_value = "info", global = true)]
     pub log_level: LevelFilter,
 
     /// The path to the layout file.
