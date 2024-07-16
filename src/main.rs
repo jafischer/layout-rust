@@ -1,12 +1,12 @@
 use crate::args::Command;
 use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
 use crate::idref::IdRef;
-use crate::layout_types::MatchingWindowInfo;
 use crate::layout_types::MaybeRegex::Exact;
+use crate::layout_types::{MatchingWindowInfo, WindowPos};
 use accessibility_sys::{
-    kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize, kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue,
-    AXUIElementCreateApplication, AXUIElementRef, AXUIElementSetAttributeValue, AXValueCreate,
+    kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef,
+    AXUIElementSetAttributeValue, AXValueCreate,
 };
 use anyhow::anyhow;
 use args::Args;
@@ -61,10 +61,8 @@ fn main() {
 /// Initialize the logging. Logging goes to stderr, so as not to interfere with the layout output when
 /// --save is specified.
 fn initialize_logging(log_level: LevelFilter) {
-    let log_appender = Appender::builder().build(
-        "stdout".to_string(),
-        Box::new(ConsoleAppender::builder().target(Target::Stderr).build()),
-    );
+    let log_appender = Appender::builder()
+        .build("stdout".to_string(), Box::new(ConsoleAppender::builder().target(Target::Stderr).build()));
     let log_root = Root::builder()
         .appender("stdout".to_string())
         .build(log_level);
@@ -105,22 +103,25 @@ fn restore_layout(path: String) {
                 desired_window_info.owner_name,
                 desired_window_info.name,
             );
-            trace!(
-                "Current bounds: {:?}, desired: {:?}",
-                window_info.bounds,
-                desired_window_info.bounds
-            );
+            trace!("Current bounds: {:?}, desired: {:?}", window_info.pos, desired_window_info.pos);
 
             for matching_window in &window_info.matching_windows {
                 // Now compare the current position with the desired position to see if we need to move the window.
+                let matching_pos = WindowPos::Exact(matching_window.bounds.clone());
                 let current_absolute_bounds = absolute_bounds(
-                    &matching_window.bounds,
-                    &current_layout.screens[matching_window.screen_num - 1],
+                    &matching_pos,
+                    &current_layout
+                        .screens
+                        .get(&matching_window.screen_num)
+                        .unwrap_or(current_layout.screens.get(&1).unwrap()),
                     &current_layout.screens,
                 );
                 let desired_absolute_bounds = absolute_bounds(
-                    &desired_window_info.bounds,
-                    &desired_layout.screens[desired_window_info.screen_num - 1],
+                    &desired_window_info.pos,
+                    &desired_layout
+                        .screens
+                        .get(&desired_window_info.screen_num)
+                        .unwrap_or(current_layout.screens.get(&1).unwrap()),
                     &current_layout.screens,
                 );
 
@@ -129,35 +130,21 @@ fn restore_layout(path: String) {
                 if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
                     debug!(
                         "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
-                        window_info.owner_name,
-                        window_info.name,
-                        current_absolute_bounds,
-                        desired_absolute_bounds
+                        window_info.owner_name, window_info.name, current_absolute_bounds, desired_absolute_bounds
                     );
 
                     move_window(&window_info, matching_window, desired_absolute_bounds);
                 } else {
-                    debug!(
-                        "No need to be move {:?}/{:?}",
-                        window_info.owner_name, window_info.name
-                    );
+                    debug!("No need to be move {:?}/{:?}", window_info.owner_name, window_info.name);
                 }
             }
         } else {
-            trace!(
-                "No match for {:?}/{:?}",
-                window_info.owner_name,
-                window_info.name
-            );
+            trace!("No match for {:?}/{:?}", window_info.owner_name, window_info.name);
         }
     }
 }
 
-fn move_window(
-    window_info: &WindowInfo,
-    matching_window: &MatchingWindowInfo,
-    desired_absolute_bounds: Rect,
-) {
+fn move_window(window_info: &WindowInfo, matching_window: &MatchingWindowInfo, desired_absolute_bounds: Rect) {
     if let Ok(axwindow) = get_axwindow(matching_window.process_id, matching_window.window_id) {
         trace!(
             "Found axwindow for {:?}/{:?}/{:?}/{:?}",
@@ -183,29 +170,18 @@ fn move_window(
             )
         };
         if result != kAXErrorSuccess {
-            error!(
-                "AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}",
-                result
-            );
+            error!("AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}", result);
             return;
         }
 
         let mut cg_size: CGSize = desired_absolute_bounds.size();
-        let size =
-            unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
+        let size = unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
 
         let result = unsafe {
-            AXUIElementSetAttributeValue(
-                axwindow,
-                CFString::new(kAXSizeAttribute).as_concrete_TypeRef(),
-                size as _,
-            )
+            AXUIElementSetAttributeValue(axwindow, CFString::new(kAXSizeAttribute).as_concrete_TypeRef(), size as _)
         };
         if result != kAXErrorSuccess {
-            error!(
-                "AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}",
-                result
-            );
+            error!("AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}", result);
         }
     }
 }
@@ -224,8 +200,8 @@ fn load_layout_file(path: String) -> Layout {
     desired_layout
 }
 
-fn get_screens() -> Vec<ScreenInfo> {
-    let mut screens = Vec::new();
+fn get_screens() -> BTreeMap<u32, ScreenInfo> {
+    let mut screens = BTreeMap::new();
 
     unsafe {
         let ns_screens = NSScreen::screens(nil);
@@ -243,15 +219,17 @@ fn get_screens() -> Vec<ScreenInfo> {
             let device_desc = screen.deviceDescription();
             let value: id = msg_send![device_desc, objectForKey:*screen_num_key];
             let value: NSUInteger = msg_send![value, unsignedIntegerValue];
-            screens.push(ScreenInfo {
-                id: value as u32,
-                frame: Rect {
-                    x: frame.origin.x as i32,
-                    y: fixed_y as i32,
-                    w: frame.size.width as i32,
-                    h: frame.size.height as i32,
+            screens.insert(
+                value as u32,
+                ScreenInfo {
+                    frame: Rect {
+                        x: frame.origin.x as i32,
+                        y: fixed_y as i32,
+                        w: frame.size.width as i32,
+                        h: frame.size.height as i32,
+                    },
                 },
-            });
+            );
         }
     }
     screens
@@ -259,7 +237,15 @@ fn get_screens() -> Vec<ScreenInfo> {
 
 fn get_current_layout() -> Layout {
     let screens = get_screens();
+    if screens.is_empty() {
+        panic!("Unable to enumerate screens.\nPlease add layout to the 'Screen & System Audio Recording' apps\nin System Preferences -> Privacy & Security")
+    }
+
     let windows = get_windows(&screens);
+    if windows.is_empty() {
+        panic!("Unable to enumerate windows.\nPlease add layout to the 'Screen & System Audio Recording' apps\nin System Preferences -> Privacy & Security")
+    }
+
     Layout { screens, windows }
 }
 
@@ -271,9 +257,8 @@ fn owners_to_ignore() -> HashSet<String> {
     ])
 }
 
-fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
+fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
     // Use a map of maps here to get a nicely ordered list. Ordered by owner name and then window name.
-    // Note
     let mut window_map: BTreeMap<String, BTreeMap<String, WindowInfo>> = BTreeMap::new();
     let owners_to_ignore = owners_to_ignore();
 
@@ -300,8 +285,7 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
         let window_name = get_string_from_dict(&window_dict, "kCGWindowName");
 
         // Skip some obvious windows: empty names, or names in the ignore list.
-        if owner_name.is_empty() || window_name.is_empty() || owners_to_ignore.contains(&owner_name)
-        {
+        if owner_name.is_empty() || window_name.is_empty() || owners_to_ignore.contains(&owner_name) {
             continue;
         }
 
@@ -315,18 +299,17 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
         let process_id: i32 = get_num_from_dict(&window_dict, "kCGWindowOwnerPID");
         let window_id: u32 = get_num_from_dict(&window_dict, "kCGWindowNumber");
 
-        let bounds = CGRect::from_dict_representation(&bounds).unwrap();
-
-        window_info.bounds = bounds.into();
+        let bounds: Rect = CGRect::from_dict_representation(&bounds).unwrap().into();
+        window_info.pos = WindowPos::Exact(bounds.clone());
 
         // Skip windows below a certain size
-        if window_info.bounds.w <= MIN_WIDTH && window_info.bounds.h <= MIN_HEIGHT {
+        if bounds.w <= MIN_WIDTH && bounds.h <= MIN_HEIGHT {
             continue;
         }
 
-        let (display_id, adjusted_bounds) = relative_bounds(&window_info.bounds, &screens);
-        window_info.screen_num = display_id as usize;
-        window_info.bounds = adjusted_bounds;
+        let (display_id, adjusted_bounds) = relative_bounds(&bounds, &screens);
+        window_info.screen_num = display_id as u32;
+        window_info.pos = WindowPos::Exact(adjusted_bounds.clone());
 
         if !window_map.contains_key(&owner_name) {
             window_map.insert(owner_name.clone(), BTreeMap::new());
@@ -343,8 +326,8 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
         window_info.matching_windows.push(MatchingWindowInfo {
             process_id,
             window_id,
-            screen_num: display_id as usize,
-            bounds: window_info.bounds.clone(),
+            screen_num: display_id as u32,
+            bounds: adjusted_bounds.clone(),
         });
         owner_map.insert(window_name, window_info);
     }
@@ -364,27 +347,28 @@ fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
         .collect()
 }
 
-fn closest_screen(desired_screen: &ScreenInfo, current_screens: &Vec<ScreenInfo>) -> ScreenInfo {
-    if let Some(closest_screen) = current_screens.iter().min_by(|screen1, screen2| {
-        let dist1 = (screen1.frame.x - desired_screen.frame.x).abs()
-            + (screen1.frame.y - desired_screen.frame.y).abs();
-        let dist2 = (screen2.frame.x - desired_screen.frame.x).abs()
-            + (screen2.frame.y - desired_screen.frame.y).abs();
+fn closest_screen(desired_screen: &ScreenInfo, current_screens: &BTreeMap<u32, ScreenInfo>) -> ScreenInfo {
+    let (_, closest_screen) = current_screens
+        .iter()
+        .min_by(|(_index1, screen1), (_index2, screen2)| {
+            let dist1 =
+                (screen1.frame.x - desired_screen.frame.x).abs() + (screen1.frame.y - desired_screen.frame.y).abs();
+            let dist2 =
+                (screen2.frame.x - desired_screen.frame.x).abs() + (screen2.frame.y - desired_screen.frame.y).abs();
 
-        dist1.cmp(&dist2)
-    }) {
-        closest_screen.clone()
-    } else {
-        current_screens[0].clone()
-    }
+            dist1.cmp(&dist2)
+        })
+        .unwrap();
+
+    closest_screen.clone()
 }
 
 // Convert absolute window pos to one that's relative to the screen the window is on.
-fn relative_bounds(window_bounds: &Rect, screens: &Vec<ScreenInfo>) -> (CGDirectDisplayID, Rect) {
-    for screen in screens {
+fn relative_bounds(window_bounds: &Rect, screens: &BTreeMap<u32, ScreenInfo>) -> (CGDirectDisplayID, Rect) {
+    for (index, screen) in screens {
         if screen.frame.contains_origin(window_bounds) {
             return (
-                screen.id,
+                *index,
                 Rect {
                     x: window_bounds.x - screen.frame.x,
                     y: window_bounds.y - screen.frame.y,
@@ -396,7 +380,7 @@ fn relative_bounds(window_bounds: &Rect, screens: &Vec<ScreenInfo>) -> (CGDirect
     }
 
     (
-        1,
+        1, // Default to the primary screen.
         Rect {
             x: 0,
             y: 0,
@@ -407,19 +391,10 @@ fn relative_bounds(window_bounds: &Rect, screens: &Vec<ScreenInfo>) -> (CGDirect
 }
 
 // Convert absolute window pos to one that's relative to the screen the window is on.
-fn absolute_bounds(
-    window_bounds: &Rect,
-    screen_info: &ScreenInfo,
-    screens: &Vec<ScreenInfo>,
-) -> Rect {
+fn absolute_bounds(window_pos: &WindowPos, screen_info: &ScreenInfo, screens: &BTreeMap<u32, ScreenInfo>) -> Rect {
     let screen = closest_screen(&screen_info, &screens);
 
-    Rect {
-        x: window_bounds.x + screen.frame.x,
-        y: window_bounds.y + screen.frame.y,
-        w: window_bounds.w,
-        h: window_bounds.h,
-    }
+    window_pos.to_absolute(&screen)
 }
 
 //
@@ -468,9 +443,7 @@ fn get_axwindow(owner_id: i32, window_id: u32) -> anyhow::Result<AXUIElementRef>
 
         let ax_window_id = {
             let mut id: CGWindowID = 0;
-            if unsafe { _AXUIElementGetWindow(ax_window as AXUIElementRef, &mut id) }
-                != kAXErrorSuccess
-            {
+            if unsafe { _AXUIElementGetWindow(ax_window as AXUIElementRef, &mut id) } != kAXErrorSuccess {
                 continue;
             }
             id

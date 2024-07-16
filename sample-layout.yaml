@@ -1,12 +1,12 @@
 # These are the screens that were attached when this layout was saved. Layout will attempt to restore each window to the
 # appropriate monitor even if the monitor arrangement has changed.
 screens:
-  - id: 1
-    frame: 0,0,1728,1117
-  - id: 2
-    frame: 1728,0,1920,1080
-  - id: 3
-    frame: -1920,0,1920,1080
+  1:
+    frame: -1728,0,1728,1117
+  2:
+    frame: 0,0,3360,1890
+  3:
+    frame: 3360,0,1920,1080
 
 # Now a list of windows and their desired placement.
 windows:
@@ -15,90 +15,90 @@ windows:
   # See https://docs.rs/regex/latest/regex/#syntax
 
   # I use several different JetBrains IDEs, and I want them all to be arranged the same.
-  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
+  - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)
     # The main Jetbrains IDE window names are of the format "project - current file",
     # e.g. "layout-rust – sample-layout.yaml".
     name: .* – .*
-    screen_num: 3
-    bounds: 0,25,1920,1055
-  # I also personally like to have the various tool windows in floating mode, on separate monitors.
+    screen_num: 2
+    pos: !Max
+  # I also personally like to have the Run, Debug, Find and Build views in floating mode, on separate monitors.
   - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Build
-    screen_num: 2
-    bounds: 0,246,1646,399
+    screen_num: 3
+    pos: !Exact 0,246,1646,399
   - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Debug
-    screen_num: 2
-    bounds: 0,579,1646,500
+    screen_num: 3
+    pos: !Exact 0,579,1646,500
   - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Find
-    screen_num: 2
-    bounds: 0,400,1646,458
+    screen_num: 3
+    pos: !Exact 0,400,1646,458
   - owner_name: (RustRover)|(CLion)|(IntelliJ)|(PyCharm)|(WebStorm)|(GoLand)
     name: Run
-    screen_num: 2
-    bounds: 0,25,1646,482
+    screen_num: 3
+    pos: !Exact 0,25,1646,482
   # VS Code
   - owner_name: Code
     name: .* - .*
     screen_num: 2
-    bounds: 0,25,1920,1055
+    pos: !Max
   - owner_name: Firefox
     name: .*
     screen_num: 1
-    bounds: 0,38,1728,1009
+    pos: !Max
   - owner_name: Google Chrome
     name: .*
     screen_num: 1
-    bounds: 0,38,1728,1009
+    pos: !Max
   - owner_name: Messages
     name: .*
     screen_num: 1
-    bounds: 300,38,1000,1009
-  - owner_name: Microsoft Edge.*
+    pos: !Exact 300,38,1000,1009
+  - owner_name: Microsoft Edge Dev
     name: .*
     screen_num: 1
-    bounds: 0,38,1728,1009
+    pos: !Max
   - owner_name: Microsoft OneNote
     name: .*
     screen_num: 1
-    bounds: 28,38,1646,1009
+    pos: !Exact 28,38,1646,1009
   - owner_name: Microsoft Outlook
     name: Inbox.*
-    screen_num: 2
-    bounds: 0,25,1920,1092
+    screen_num: 3
+    pos: !Max
   - owner_name: Microsoft Outlook
     name: 1 Reminder
-    screen_num: 1
-    bounds: 1314,883,400,143
+    screen_num: 2
+    pos: !Exact 1314,883,400,143
   - owner_name: Music
     name: Music
-    screen_num: 2
-    bounds: 64,97,1571,873
+    screen_num: 3
+    pos: !Exact 64,97,1571,873
   - owner_name: Slack
     name: .*
     screen_num: 1
-    bounds: 0,38,1728,1009
+    pos: !Max
   # SmartGit main window
   - owner_name: SmartGit
     name: .* - SmartGit.*
-    screen_num: 1
-    bounds: 0,38,1728,1009
+    screen_num: 2
+    pos: !Max
   # SmartGit file compare
   - owner_name: SmartGit
     name: .* - File Compare
-    screen_num: 2
-    bounds: 0,25,1646,1055
+    screen_num: 3
+    pos: !Max
   # SmartGit Log
   - owner_name: SmartGit
     name: .* - Log.*
-    screen_num: 2
-    bounds: 0,25,1646,1055
+    screen_num: 3
+    pos: !Exact 0,25,1646,1055
   - owner_name: Terminal
     name: .*
-    screen_num: 1
-    bounds: 0,38,1705,995
+    screen_num: 2
+    pos: !Max
   - owner_name: Postman
     name: .*
     screen_num: 1
-    bounds: 0,38,1728,1009
+    pos: !Max
