@@ -9,6 +9,8 @@
   <component name="ChangeListManager">
     <list default="true" id="f5b95237-7811-4a33-be0c-ddf54dfc6139" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -48,30 +50,30 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Cargo.Run layout-rust.executor": "Debug",
-    "Cargo.layout restore.executor": "Debug",
-    "Cargo.layout save.executor": "Debug",
-    "Cargo.layout-rust --release.executor": "Run",
-    "Cargo.layout-rust.executor": "Debug",
-    "Cargo.layout.executor": "Debug",
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.rust.reset.selective.auto.import": "true",
-    "git-widget-placeholder": "main",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
-    "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
-    "run.code.analysis.last.selected.profile": "pProject Default",
-    "settings.editor.selected.configurable": "reference.settings.ide.settings.new.ui",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Cargo.Run layout-rust.executor&quot;: &quot;Debug&quot;,
+    &quot;Cargo.layout restore.executor&quot;: &quot;Debug&quot;,
+    &quot;Cargo.layout save.executor&quot;: &quot;Debug&quot;,
+    &quot;Cargo.layout-rust --release.executor&quot;: &quot;Run&quot;,
+    &quot;Cargo.layout-rust.executor&quot;: &quot;Debug&quot;,
+    &quot;Cargo.layout.executor&quot;: &quot;Debug&quot;,
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.rust.reset.selective.auto.import&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;org.rust.cargo.project.model.PROJECT_DISCOVERY&quot;: &quot;true&quot;,
+    &quot;org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon&quot;: &quot;&quot;,
+    &quot;run.code.analysis.last.selected.profile&quot;: &quot;pProject Default&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;reference.settings.ide.settings.new.ui&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RsExternalLinterProjectSettings">
     <option name="runOnTheFly" value="true" />
   </component>
@@ -128,9 +130,9 @@
       </method>
     </configuration>
     <list>
+      <item itemvalue="Cargo.Test layout-rust" />
       <item itemvalue="Cargo.layout restore" />
       <item itemvalue="Cargo.layout save" />
-      <item itemvalue="Cargo.Test layout-rust" />
     </list>
   </component>
   <component name="RustProjectSettings">
@@ -163,7 +165,10 @@
       <workItem from="1721092604365" duration="1211000" />
       <workItem from="1721093826215" duration="2364000" />
       <workItem from="1721096952560" duration="2330000" />
-      <workItem from="1721099300177" duration="12379000" />
+      <workItem from="1721099300177" duration="12540000" />
+      <workItem from="1721840793209" duration="253000" />
+      <workItem from="1723571296303" duration="335000" />
+      <workItem from="1723572112151" duration="2060000" />
     </task>
     <servers />
   </component>

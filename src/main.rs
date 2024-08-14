@@ -1,15 +1,17 @@
-use crate::args::Command;
-use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
-use crate::idref::IdRef;
-use crate::layout_types::MaybeRegex::Exact;
-use crate::layout_types::{MatchingWindowInfo, WindowPos};
+#[macro_use]
+extern crate objc;
+
+use std::collections::{BTreeMap, HashSet};
+use std::ffi::c_void;
+use std::fs::File;
+use std::io::BufReader;
+
 use accessibility_sys::{
-    kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint, kAXValueTypeCGSize,
-    kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef,
-    AXUIElementSetAttributeValue, AXValueCreate,
+    AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef, AXUIElementSetAttributeValue,
+    AXValueCreate, kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint,
+    kAXValueTypeCGSize, kAXWindowsAttribute,
 };
 use anyhow::anyhow;
-use args::Args;
 use clap::Parser;
 use cocoa::appkit::NSScreen;
 use cocoa_foundation::base::{id, nil};
@@ -21,18 +23,19 @@ use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_graphics::display;
 use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGWindowID};
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
-use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
-use log::{debug, error, trace, LevelFilter};
+use log::{debug, error, LevelFilter, trace};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
 use regex::Regex;
-use std::collections::{BTreeMap, HashSet};
-use std::ffi::c_void;
-use std::fs::File;
-use std::io::BufReader;
 
-#[macro_use]
-extern crate objc;
+use args::Args;
+use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
+
+use crate::args::Command;
+use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
+use crate::idref::IdRef;
+use crate::layout_types::{MatchingWindowInfo, WindowPos};
+use crate::layout_types::MaybeRegex::Exact;
 
 extern "C" {
     pub fn _AXUIElementGetWindow(element: AXUIElementRef, out: *mut CGWindowID) -> AXError;
@@ -84,62 +87,69 @@ fn save_layout() {
 /// Load the desired layout, and move all matching windows to their desired position.
 fn restore_layout(path: String) {
     let desired_layout = load_layout_file(path);
-    let current_layout = get_current_layout();
 
-    for window_info in current_layout.windows {
-        // See if there's a match for the Owner + Window names in the desired layout.
-        //
-        // Note: Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
-        // We're talking dozens, not millions.
-        if let Some(desired_window_info) = desired_layout
-            .windows
-            .iter()
-            .find(|d| d.matches(&window_info))
-        {
-            trace!(
-                "Found match for window {:?}/{:?}: {:?}/{:?}",
-                window_info.owner_name,
-                window_info.name,
-                desired_window_info.owner_name,
-                desired_window_info.name,
-            );
-            trace!("Current bounds: {:?}, desired: {:?}", window_info.pos, desired_window_info.pos);
+    // I have noticed that when moving from a small monitor to a large (e.g. 4K) one, the window gets
+    // moved but does not get resized properly. So rather than introduce complex logic I'm just going to
+    // try looping through all windows twice.
 
-            for matching_window in &window_info.matching_windows {
-                // Now compare the current position with the desired position to see if we need to move the window.
-                let matching_pos = WindowPos::Exact(matching_window.bounds.clone());
-                let current_absolute_bounds = absolute_bounds(
-                    &matching_pos,
-                    &current_layout
-                        .screens
-                        .get(&matching_window.screen_num)
-                        .unwrap_or(current_layout.screens.get(&1).unwrap()),
-                    &current_layout.screens,
+    for _ in 0..2 {
+        let current_layout = get_current_layout();
+
+        for window_info in current_layout.windows {
+            // See if there's a match for the Owner + Window names in the desired layout.
+            //
+            // Note: Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
+            // We're talking dozens, not millions.
+            if let Some(desired_window_info) = desired_layout
+                .windows
+                .iter()
+                .find(|d| d.matches(&window_info))
+            {
+                trace!(
+                    "Found match for window {:?}/{:?}: {:?}/{:?}",
+                    window_info.owner_name,
+                    window_info.name,
+                    desired_window_info.owner_name,
+                    desired_window_info.name,
                 );
-                let desired_absolute_bounds = absolute_bounds(
-                    &desired_window_info.pos,
-                    &desired_layout
-                        .screens
-                        .get(&desired_window_info.screen_num)
-                        .unwrap_or(current_layout.screens.get(&1).unwrap()),
-                    &current_layout.screens,
-                );
+                trace!("Current bounds: {:?}, desired: {:?}", window_info.pos, desired_window_info.pos);
 
-                // Rather than checking for equality, check for "within a couple of pixels" because I've found
-                // that after moving, the window coords don't always exactly match what I sent.
-                if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
-                    debug!(
-                        "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
-                        window_info.owner_name, window_info.name, current_absolute_bounds, desired_absolute_bounds
+                for matching_window in &window_info.matching_windows {
+                    // Now compare the current position with the desired position to see if we need to move the window.
+                    let matching_pos = WindowPos::Exact(matching_window.bounds.clone());
+                    let current_absolute_bounds = absolute_bounds(
+                        &matching_pos,
+                        &current_layout
+                            .screens
+                            .get(&matching_window.screen_num)
+                            .unwrap_or(current_layout.screens.get(&1).unwrap()),
+                        &current_layout.screens,
+                    );
+                    let desired_absolute_bounds = absolute_bounds(
+                        &desired_window_info.pos,
+                        &desired_layout
+                            .screens
+                            .get(&desired_window_info.screen_num)
+                            .unwrap_or(current_layout.screens.get(&1).unwrap()),
+                        &current_layout.screens,
                     );
 
-                    move_window(&window_info, matching_window, desired_absolute_bounds);
-                } else {
-                    debug!("No need to be move {:?}/{:?}", window_info.owner_name, window_info.name);
+                    // Rather than checking for equality, check for "within a couple of pixels" because I've found
+                    // that after moving, the window coords don't always exactly match what I sent.
+                    if !current_absolute_bounds.is_close(&desired_absolute_bounds) {
+                        debug!(
+                            "Needs to be moved: {:?}/{:?}: {:?}->{:?}",
+                            window_info.owner_name, window_info.name, current_absolute_bounds, desired_absolute_bounds
+                        );
+
+                        move_window(&window_info, matching_window, desired_absolute_bounds);
+                    } else {
+                        debug!("No need to be move {:?}/{:?}", window_info.owner_name, window_info.name);
+                    }
                 }
+            } else {
+                trace!("No match for {:?}/{:?}", window_info.owner_name, window_info.name);
             }
-        } else {
-            trace!("No match for {:?}/{:?}", window_info.owner_name, window_info.name);
         }
     }
 }
