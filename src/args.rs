@@ -26,6 +26,7 @@ pub enum Command {
 }
 
 impl Args {
+    /// "restore" is the default command if none are specified.
     pub fn command(&self) -> Command {
         self.command.clone().unwrap_or(Command::Restore)
     }

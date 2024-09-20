@@ -1,15 +1,10 @@
 #[macro_use]
 extern crate objc;
 
-use std::collections::{BTreeMap, HashSet};
-use std::ffi::c_void;
-use std::fs::File;
-use std::io::BufReader;
-
 use accessibility_sys::{
-    AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef, AXUIElementSetAttributeValue,
-    AXValueCreate, kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize, kAXWindowsAttribute,
+    kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef,
+    AXUIElementSetAttributeValue, AXValueCreate,
 };
 use anyhow::anyhow;
 use clap::Parser;
@@ -23,19 +18,25 @@ use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_graphics::display;
 use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGWindowID};
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
-use log::{debug, error, LevelFilter, trace};
+use log::{debug, error, trace, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
 use regex::Regex;
+use std::collections::{BTreeMap, HashSet};
+use std::ffi::c_void;
+use std::fs::File;
+use std::io::BufReader;
+use std::thread::sleep;
+use std::time::Duration;
 
 use args::Args;
-use layout_types::{Layout, Rect, ScreenInfo, WindowInfo};
+use layout_types::{Layout, Rect, ScreenInfo, WindowInfo, MIN_HEIGHT, MIN_WIDTH};
 
 use crate::args::Command;
 use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};
 use crate::idref::IdRef;
-use crate::layout_types::{MatchingWindowInfo, WindowPos};
 use crate::layout_types::MaybeRegex::Exact;
+use crate::layout_types::{MatchingWindowInfo, WindowPos};
 
 extern "C" {
     pub fn _AXUIElementGetWindow(element: AXUIElementRef, out: *mut CGWindowID) -> AXError;
@@ -45,9 +46,6 @@ mod args;
 mod dict_utils;
 mod idref;
 mod layout_types;
-
-const MIN_WIDTH: i32 = 64;
-const MIN_HEIGHT: i32 = 64;
 
 /// See args.rs for command line arguments.
 fn main() {
@@ -62,16 +60,12 @@ fn main() {
 }
 
 /// Initialize the logging. Logging goes to stderr, so as not to interfere with the layout output when
-/// --save is specified.
+/// save is specified.
 fn initialize_logging(log_level: LevelFilter) {
     let log_appender = Appender::builder()
         .build("stdout".to_string(), Box::new(ConsoleAppender::builder().target(Target::Stderr).build()));
-    let log_root = Root::builder()
-        .appender("stdout".to_string())
-        .build(log_level);
-    let log_config = log4rs::config::Config::builder()
-        .appender(log_appender)
-        .build(log_root);
+    let log_root = Root::builder().appender("stdout".to_string()).build(log_level);
+    let log_config = log4rs::config::Config::builder().appender(log_appender).build(log_root);
 
     // Keeping the redundant prefix here to make it clear just what "config" is being initialized here.
     log4rs::config::init_config(log_config.unwrap()).unwrap();
@@ -84,7 +78,7 @@ fn save_layout() {
     println!("{}", serde_yaml::to_string(&layout).unwrap());
 }
 
-/// Load the desired layout, and move all matching windows to their desired position.
+/// Loads the desired layout, and moves all matching windows to their desired position.
 fn restore_layout(path: String) {
     let desired_layout = load_layout_file(path);
 
@@ -100,11 +94,7 @@ fn restore_layout(path: String) {
             //
             // Note: Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
             // We're talking dozens, not millions.
-            if let Some(desired_window_info) = desired_layout
-                .windows
-                .iter()
-                .find(|d| d.matches(&window_info))
-            {
+            if let Some(desired_window_info) = desired_layout.windows.iter().find(|d| d.matches(&window_info)) {
                 trace!(
                     "Found match for window {:?}/{:?}: {:?}/{:?}",
                     window_info.owner_name,
@@ -145,58 +135,19 @@ fn restore_layout(path: String) {
 
                         move_window(&window_info, matching_window, desired_absolute_bounds);
                     } else {
-                        debug!("No need to be move {:?}/{:?}", window_info.owner_name, window_info.name);
+                        debug!("No need to move {:?}/{:?}", window_info.owner_name, window_info.name);
                     }
                 }
             } else {
                 trace!("No match for {:?}/{:?}", window_info.owner_name, window_info.name);
             }
         }
+
+        sleep(Duration::from_millis(500));
     }
 }
 
-fn move_window(window_info: &WindowInfo, matching_window: &MatchingWindowInfo, desired_absolute_bounds: Rect) {
-    if let Ok(axwindow) = get_axwindow(matching_window.process_id, matching_window.window_id) {
-        trace!(
-            "Found axwindow for {:?}/{:?}/{:?}/{:?}",
-            window_info.owner_name,
-            window_info.name,
-            matching_window.process_id,
-            matching_window.window_id
-        );
-
-        let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
-        let position = unsafe {
-            AXValueCreate(
-                kAXValueTypeCGPoint,
-                // What a masterpiece of ugliness:
-                &mut cg_pos as *mut _ as *mut c_void,
-            )
-        };
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                axwindow,
-                CFString::new(kAXPositionAttribute).as_concrete_TypeRef(),
-                position as _,
-            )
-        };
-        if result != kAXErrorSuccess {
-            error!("AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}", result);
-            return;
-        }
-
-        let mut cg_size: CGSize = desired_absolute_bounds.size();
-        let size = unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
-
-        let result = unsafe {
-            AXUIElementSetAttributeValue(axwindow, CFString::new(kAXSizeAttribute).as_concrete_TypeRef(), size as _)
-        };
-        if result != kAXErrorSuccess {
-            error!("AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}", result);
-        }
-    }
-}
-
+/// Loads the user's layout file.
 fn load_layout_file(path: String) -> Layout {
     // Don't need the portable "home" crate, because this is MacOs-only.
     let home: String = env!("HOME").into();
@@ -211,6 +162,7 @@ fn load_layout_file(path: String) -> Layout {
     desired_layout
 }
 
+/// Returns a list of the current screens, as a map of Screen ID to `ScreenInfo`
 fn get_screens() -> BTreeMap<u32, ScreenInfo> {
     let mut screens = BTreeMap::new();
 
@@ -246,6 +198,7 @@ fn get_screens() -> BTreeMap<u32, ScreenInfo> {
     screens
 }
 
+/// Returns the current window layout.
 fn get_current_layout() -> Layout {
     let screens = get_screens();
     if screens.is_empty() {
@@ -260,14 +213,12 @@ fn get_current_layout() -> Layout {
     Layout { screens, windows }
 }
 
+/// Returns a list of window owners that we wish to ignore.
 fn owners_to_ignore() -> HashSet<String> {
-    HashSet::from([
-        "Control Center".into(),
-        "Dock".into(),
-        "Window Server".into(),
-    ])
+    HashSet::from(["Control Center".into(), "Dock".into(), "Window Server".into()])
 }
 
+/// Returns a list of `WindowInfo` for the current desktop windows.
 fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
     // Use a map of maps here to get a nicely ordered list. Ordered by owner name and then window name.
     let mut window_map: BTreeMap<String, BTreeMap<String, WindowInfo>> = BTreeMap::new();
@@ -311,7 +262,7 @@ fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
         let window_id: u32 = get_num_from_dict(&window_dict, "kCGWindowNumber");
 
         let bounds: Rect = CGRect::from_dict_representation(&bounds).unwrap().into();
-        window_info.pos = WindowPos::Exact(bounds.clone());
+        window_info.pos = WindowPos::Pos(bounds.clone());
 
         // Skip windows below a certain size
         if bounds.w <= MIN_WIDTH && bounds.h <= MIN_HEIGHT {
@@ -320,7 +271,7 @@ fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
 
         let (display_id, adjusted_bounds) = relative_bounds(&bounds, &screens);
         window_info.screen_num = display_id as u32;
-        window_info.pos = WindowPos::Exact(adjusted_bounds.clone());
+        window_info.pos = WindowPos::Pos(adjusted_bounds.clone());
 
         if !window_map.contains_key(&owner_name) {
             window_map.insert(owner_name.clone(), BTreeMap::new());
@@ -358,6 +309,49 @@ fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
         .collect()
 }
 
+/// Moves the specified window to the desired location.
+fn move_window(window_info: &WindowInfo, matching_window: &MatchingWindowInfo, desired_absolute_bounds: Rect) {
+    if let Ok(axwindow) = get_axwindow(matching_window.process_id, matching_window.window_id) {
+        trace!(
+            "Found axwindow for {:?}/{:?}/{:?}/{:?}",
+            window_info.owner_name,
+            window_info.name,
+            matching_window.process_id,
+            matching_window.window_id
+        );
+
+        let mut cg_pos: CGPoint = desired_absolute_bounds.origin();
+        let position = unsafe {
+            AXValueCreate(
+                kAXValueTypeCGPoint,
+                // What a masterpiece of ugliness:
+                &mut cg_pos as *mut _ as *mut c_void,
+            )
+        };
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                axwindow,
+                CFString::new(kAXPositionAttribute).as_concrete_TypeRef(),
+                position as _,
+            )
+        };
+        if result != kAXErrorSuccess {
+            error!("AXUIElementSetAttributeValue(kAXPositionAttribute) failed: {:?}", result);
+            return;
+        }
+
+        let mut cg_size: CGSize = desired_absolute_bounds.size();
+        let size = unsafe { AXValueCreate(kAXValueTypeCGSize, &mut cg_size as *mut _ as *mut c_void) };
+
+        let result = unsafe {
+            AXUIElementSetAttributeValue(axwindow, CFString::new(kAXSizeAttribute).as_concrete_TypeRef(), size as _)
+        };
+        if result != kAXErrorSuccess {
+            error!("AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}", result);
+        }
+    }
+}
+
 fn closest_screen(desired_screen: &ScreenInfo, current_screens: &BTreeMap<u32, ScreenInfo>) -> ScreenInfo {
     let (_, closest_screen) = current_screens
         .iter()
@@ -374,7 +368,7 @@ fn closest_screen(desired_screen: &ScreenInfo, current_screens: &BTreeMap<u32, S
     closest_screen.clone()
 }
 
-// Convert absolute window pos to one that's relative to the screen the window is on.
+/// Convert absolute window pos to one that's relative to the screen the window is on.
 fn relative_bounds(window_bounds: &Rect, screens: &BTreeMap<u32, ScreenInfo>) -> (CGDirectDisplayID, Rect) {
     for (index, screen) in screens {
         if screen.frame.contains_origin(window_bounds) {
@@ -401,18 +395,18 @@ fn relative_bounds(window_bounds: &Rect, screens: &BTreeMap<u32, ScreenInfo>) ->
     )
 }
 
-// Convert absolute window pos to one that's relative to the screen the window is on.
+/// Convert absolute window pos to one that's relative to the screen the window is on.
 fn absolute_bounds(window_pos: &WindowPos, screen_info: &ScreenInfo, screens: &BTreeMap<u32, ScreenInfo>) -> Rect {
     let screen = closest_screen(&screen_info, &screens);
 
     window_pos.to_absolute(&screen)
 }
 
-//
-// One annoyance is that we have to enumerate all desktop windows using the CGWindowList API,
-// and yet we have to use an entirely different API (the Accessibility API) to actually move the
-// windows.
-//
+/// Given an Owner ID and Window ID from the `CGWindowList` API, returns the corresponding `AXUIElementRef` to
+/// use with the Accessibility API.
+/// <br>(We need this because, annoyingly, we enumerate desktop windows using the CGWindowList API,
+/// and yet we have to use an entirely different API -- the Accessibility API -- to actually move the
+/// windows).
 fn get_axwindow(owner_id: i32, window_id: u32) -> anyhow::Result<AXUIElementRef> {
     let ax_application = unsafe { AXUIElementCreateApplication(owner_id) };
     let mut windows_ref: CFTypeRef = std::ptr::null();
