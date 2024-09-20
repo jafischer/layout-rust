@@ -110,10 +110,12 @@ fn restore_layout(path: String) {
                     // Now compare the current position with the desired position to see if we need to move the window.
                     let matching_pos = WindowPos::Pos(matching_window.bounds.clone());
                     // If the screen index is higher than the current number of screens, just take the right-most.
-                    let screen_index = (matching_window.screen_num - 1).min(screens.len() - 1);
-                    let screen = screens.get(screen_index).unwrap();
-                    let current_absolute_bounds = matching_pos.to_absolute(&screen);
-                    let desired_absolute_bounds = desired_window_info.pos.to_absolute(&screen);
+                    let current_screen_index = (matching_window.screen_num - 1).min(screens.len() - 1);
+                    let current_screen = &screens[current_screen_index];
+                    let desired_screen_index = (desired_window_info.screen_num - 1).min(screens.len() - 1);
+                    let desired_screen = &screens[desired_screen_index];
+                    let current_absolute_bounds = matching_pos.to_absolute(&current_screen);
+                    let desired_absolute_bounds = desired_window_info.pos.to_absolute(&desired_screen);
 
                     // Rather than checking for equality, check for "within a couple of pixels" because I've found
                     // that after moving, the window coords don't always exactly match what I sent.
