@@ -116,13 +116,14 @@ fn restore_layout(path: String) {
 
                 for matching_window in &window_info.matching_windows {
                     // Now compare the current position with the desired position to see if we need to move the window.
-                    let matching_pos = WindowPos::Exact(matching_window.bounds.clone());
+                    let matching_pos = WindowPos::Pos(matching_window.bounds.clone());
+                    let first_screen = current_layout.screens.first_key_value().unwrap().1;
                     let current_absolute_bounds = absolute_bounds(
                         &matching_pos,
                         &current_layout
                             .screens
                             .get(&matching_window.screen_num)
-                            .unwrap_or(current_layout.screens.get(&1).unwrap()),
+                            .unwrap_or(first_screen),
                         &current_layout.screens,
                     );
                     let desired_absolute_bounds = absolute_bounds(
@@ -130,7 +131,7 @@ fn restore_layout(path: String) {
                         &desired_layout
                             .screens
                             .get(&desired_window_info.screen_num)
-                            .unwrap_or(current_layout.screens.get(&1).unwrap()),
+                            .unwrap_or(first_screen),
                         &current_layout.screens,
                     );
 
