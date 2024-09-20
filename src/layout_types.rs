@@ -1,10 +1,12 @@
-use crate::layout_types::MaybeRegex::{Exact, RE};
+use std::collections::BTreeMap;
+use std::fmt::Display;
+
 use core_graphics_types::base::CGFloat;
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::BTreeMap;
-use std::fmt::Display;
+
+use crate::layout_types::MaybeRegex::{Exact, RE};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Layout {
@@ -31,56 +33,66 @@ pub struct WindowInfo {
     pub pos: WindowPos,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum WindowPos {
     #[default]
-    Max,
-    Left(u32),
-    Right(u32),
-    Top(u32),
-    Bottom(u32),
-    Exact(Rect),
+    Maxed,
+    Left(f32),
+    Right(f32),
+    Top(f32),
+    Bottom(f32),
+    Pos(Rect),
 }
 
 impl WindowPos {
     pub(crate) fn to_absolute(&self, screen: &ScreenInfo) -> Rect {
         match self {
-            WindowPos::Max => Rect {
+            WindowPos::Maxed => Rect {
                 x: screen.frame.x,
                 y: screen.frame.y,
                 w: screen.frame.w,
                 h: screen.frame.h,
             },
-            WindowPos::Left(width) => Rect {
+            WindowPos::Pos(rect) => {
+                let x = if rect.x < 0 { screen.frame.w + rect.x } else { rect.x };
+                let y = if rect.y < 0 { screen.frame.h + rect.y } else { rect.y };
+                Rect {
+                    x: x + screen.frame.x,
+                    y: y + screen.frame.y,
+                    w: rect.w,
+                    h: rect.h,
+                }
+            }
+            WindowPos::Left(fraction) => Rect {
                 x: screen.frame.x,
                 y: screen.frame.y,
-                w: *width as i32,
+                w: (screen.frame.w as f32 * fraction) as i32,
                 h: screen.frame.h,
             },
-            WindowPos::Right(width) => Rect {
-                x: screen.frame.x + screen.frame.w - *width as i32,
-                y: screen.frame.y,
-                w: *width as i32,
-                h: screen.frame.h,
-            },
-            WindowPos::Top(height) => Rect {
+            WindowPos::Right(fraction) => {
+                let w = (screen.frame.w as f32 * fraction) as i32;
+                Rect {
+                    x: screen.frame.x + screen.frame.w - w,
+                    y: screen.frame.y,
+                    w,
+                    h: screen.frame.h,
+                }
+            }
+            WindowPos::Top(fraction) => Rect {
                 x: screen.frame.x,
                 y: screen.frame.y,
                 w: screen.frame.w,
-                h: *height as i32,
+                h: (screen.frame.h as f32 * fraction) as i32,
             },
-            WindowPos::Bottom(height) => Rect {
-                x: screen.frame.x,
-                y: screen.frame.y + screen.frame.h - *height as i32,
-                w: screen.frame.w,
-                h: *height as i32,
-            },
-            WindowPos::Exact(rect) => Rect {
-                x: rect.x + screen.frame.x,
-                y: rect.y + screen.frame.y,
-                w: rect.w,
-                h: rect.h,
-            },
+            WindowPos::Bottom(fraction) => {
+                let h = (screen.frame.h as f32 * fraction) as i32;
+                Rect {
+                    x: screen.frame.x,
+                    y: screen.frame.y + screen.frame.h - h,
+                    w: screen.frame.w,
+                    h,
+                }
+            }
         }
     }
 }
@@ -260,3 +272,6 @@ impl From<CGRect> for Rect {
         }
     }
 }
+
+pub const MIN_WIDTH: i32 = 64;
+pub const MIN_HEIGHT: i32 = 64;
