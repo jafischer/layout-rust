@@ -16,7 +16,7 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::*;
 use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_graphics::display;
-use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGWindowID};
+use core_graphics::display::{CGDisplay, CGWindowID};
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use log::{debug, error, trace, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
@@ -73,7 +73,8 @@ fn initialize_logging(log_level: LevelFilter) {
 
 /// Enumerate the current screens and windows, and dump to stdout.
 fn save_layout() {
-    let layout = get_current_layout();
+    let screens = get_screens();
+    let layout = get_current_layout(&screens);
 
     println!("{}", serde_yaml::to_string(&layout).unwrap());
 }
@@ -85,9 +86,10 @@ fn restore_layout(path: String) {
     // I have noticed that when moving from a small monitor to a large (e.g. 4K) one, the window gets
     // moved but does not get resized properly. So rather than introduce complex logic I'm just going to
     // try looping through all windows twice.
+    let screens = get_screens();
 
     for _ in 0..2 {
-        let current_layout = get_current_layout();
+        let current_layout = get_current_layout(&screens);
 
         for window_info in current_layout.windows {
             // See if there's a match for the Owner + Window names in the desired layout.
@@ -95,35 +97,23 @@ fn restore_layout(path: String) {
             // Note: Vec::find() is O(n) and thus the entire loop is basically O(n^2) but whatevs.
             // We're talking dozens, not millions.
             if let Some(desired_window_info) = desired_layout.windows.iter().find(|d| d.matches(&window_info)) {
-                trace!(
+                debug!(
                     "Found match for window {:?}/{:?}: {:?}/{:?}",
-                    window_info.owner_name,
-                    window_info.name,
-                    desired_window_info.owner_name,
-                    desired_window_info.name,
+                    window_info.owner_name, window_info.name, desired_window_info.owner_name, desired_window_info.name,
                 );
-                trace!("Current bounds: {:?}, desired: {:?}", window_info.pos, desired_window_info.pos);
+                debug!(
+                    "Current bounds: {}/{:?}, desired: {}/{:?}",
+                    window_info.screen_num, window_info.pos, desired_window_info.screen_num, desired_window_info.pos
+                );
 
                 for matching_window in &window_info.matching_windows {
                     // Now compare the current position with the desired position to see if we need to move the window.
                     let matching_pos = WindowPos::Pos(matching_window.bounds.clone());
-                    let first_screen = current_layout.screens.first_key_value().unwrap().1;
-                    let current_absolute_bounds = absolute_bounds(
-                        &matching_pos,
-                        &current_layout
-                            .screens
-                            .get(&matching_window.screen_num)
-                            .unwrap_or(first_screen),
-                        &current_layout.screens,
-                    );
-                    let desired_absolute_bounds = absolute_bounds(
-                        &desired_window_info.pos,
-                        &desired_layout
-                            .screens
-                            .get(&desired_window_info.screen_num)
-                            .unwrap_or(first_screen),
-                        &current_layout.screens,
-                    );
+                    // If the screen index is higher than the current number of screens, just take the right-most.
+                    let screen_index = (matching_window.screen_num - 1).min(screens.len() - 1);
+                    let screen = screens.get(screen_index).unwrap();
+                    let current_absolute_bounds = matching_pos.to_absolute(&screen);
+                    let desired_absolute_bounds = desired_window_info.pos.to_absolute(&screen);
 
                     // Rather than checking for equality, check for "within a couple of pixels" because I've found
                     // that after moving, the window coords don't always exactly match what I sent.
@@ -135,7 +125,7 @@ fn restore_layout(path: String) {
 
                         move_window(&window_info, matching_window, desired_absolute_bounds);
                     } else {
-                        debug!("No need to move {:?}/{:?}", window_info.owner_name, window_info.name);
+                        trace!("No need to move {:?}/{:?}", window_info.owner_name, window_info.name);
                     }
                 }
             } else {
@@ -162,9 +152,9 @@ fn load_layout_file(path: String) -> Layout {
     desired_layout
 }
 
-/// Returns a list of the current screens, as a map of Screen ID to `ScreenInfo`
-fn get_screens() -> BTreeMap<u32, ScreenInfo> {
-    let mut screens = BTreeMap::new();
+/// Returns a list of the current screens, ordered from left to right.
+fn get_screens() -> Vec<ScreenInfo> {
+    let mut screens = vec![];
 
     unsafe {
         let ns_screens = NSScreen::screens(nil);
@@ -180,37 +170,35 @@ fn get_screens() -> BTreeMap<u32, ScreenInfo> {
             let fixed_y = primary_frame.size.height - frame.size.height - frame.origin.y;
 
             let device_desc = screen.deviceDescription();
-            let value: id = msg_send![device_desc, objectForKey:*screen_num_key];
-            let value: NSUInteger = msg_send![value, unsignedIntegerValue];
-            screens.insert(
-                value as u32,
-                ScreenInfo {
-                    frame: Rect {
-                        x: frame.origin.x as i32,
-                        y: fixed_y as i32,
-                        w: frame.size.width as i32,
-                        h: frame.size.height as i32,
-                    },
+            let screen_id: id = msg_send![device_desc, objectForKey:*screen_num_key];
+            let screen_id: NSUInteger = msg_send![screen_id, unsignedIntegerValue];
+            screens.push(ScreenInfo {
+                screen_id: screen_id as u32,
+                frame: Rect {
+                    x: frame.origin.x as i32,
+                    y: fixed_y as i32,
+                    w: frame.size.width as i32,
+                    h: frame.size.height as i32,
                 },
-            );
+            });
         }
     }
-    screens
-}
 
-/// Returns the current window layout.
-fn get_current_layout() -> Layout {
-    let screens = get_screens();
     if screens.is_empty() {
         panic!("Unable to enumerate screens.\nPlease add layout to the 'Screen & System Audio Recording' apps\nin System Preferences -> Privacy & Security")
     }
 
-    let windows = get_windows(&screens);
-    if windows.is_empty() {
-        panic!("Unable to enumerate windows.\nPlease add layout to the 'Screen & System Audio Recording' apps\nin System Preferences -> Privacy & Security")
-    }
+    // Sort the screens left-to-right
+    screens.sort_by(|screen1, screen2| screen1.frame.x.cmp(&screen2.frame.x));
 
-    Layout { screens, windows }
+    screens
+}
+
+/// Returns the current window and screen layout.
+fn get_current_layout(screens: &Vec<ScreenInfo>) -> Layout {
+    let windows = get_windows(screens);
+
+    Layout { windows }
 }
 
 /// Returns a list of window owners that we wish to ignore.
@@ -219,7 +207,7 @@ fn owners_to_ignore() -> HashSet<String> {
 }
 
 /// Returns a list of `WindowInfo` for the current desktop windows.
-fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
+fn get_windows(screens: &Vec<ScreenInfo>) -> Vec<WindowInfo> {
     // Use a map of maps here to get a nicely ordered list. Ordered by owner name and then window name.
     let mut window_map: BTreeMap<String, BTreeMap<String, WindowInfo>> = BTreeMap::new();
     let owners_to_ignore = owners_to_ignore();
@@ -269,8 +257,9 @@ fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
             continue;
         }
 
-        let (display_id, adjusted_bounds) = relative_bounds(&bounds, &screens);
-        window_info.screen_num = display_id as u32;
+        // `bounds` is an absolute position, so convert to a position relative to the containing screen.
+        let (screen_num, adjusted_bounds) = WindowPos::Pos(bounds).to_relative(&screens);
+        window_info.screen_num = screen_num;
         window_info.pos = WindowPos::Pos(adjusted_bounds.clone());
 
         if !window_map.contains_key(&owner_name) {
@@ -288,14 +277,14 @@ fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
         window_info.matching_windows.push(MatchingWindowInfo {
             process_id,
             window_id,
-            screen_num: display_id as u32,
+            screen_num,
             bounds: adjusted_bounds.clone(),
         });
         owner_map.insert(window_name, window_info);
     }
 
     // Now flatten the map of maps into a vector that is sorted by Owner Name and then Name.
-    window_map
+    let windows: Vec<WindowInfo> = window_map
         .into_iter()
         .map(|(_, windows_by_owner)| windows_by_owner)
         .collect::<Vec<BTreeMap<String, WindowInfo>>>()
@@ -306,7 +295,13 @@ fn get_windows(screens: &BTreeMap<u32, ScreenInfo>) -> Vec<WindowInfo> {
                 .map(|(_, v)| v)
                 .collect::<Vec<WindowInfo>>()
         })
-        .collect()
+        .collect();
+
+    if windows.is_empty() {
+        panic!("Unable to enumerate windows.\nPlease add layout to the 'Screen & System Audio Recording' apps\nin System Preferences -> Privacy & Security")
+    }
+
+    windows
 }
 
 /// Moves the specified window to the desired location.
@@ -350,56 +345,6 @@ fn move_window(window_info: &WindowInfo, matching_window: &MatchingWindowInfo, d
             error!("AXUIElementSetAttributeValue(kAXSizeAttribute) failed: {:?}", result);
         }
     }
-}
-
-fn closest_screen(desired_screen: &ScreenInfo, current_screens: &BTreeMap<u32, ScreenInfo>) -> ScreenInfo {
-    let (_, closest_screen) = current_screens
-        .iter()
-        .min_by(|(_index1, screen1), (_index2, screen2)| {
-            let dist1 =
-                (screen1.frame.x - desired_screen.frame.x).abs() + (screen1.frame.y - desired_screen.frame.y).abs();
-            let dist2 =
-                (screen2.frame.x - desired_screen.frame.x).abs() + (screen2.frame.y - desired_screen.frame.y).abs();
-
-            dist1.cmp(&dist2)
-        })
-        .unwrap();
-
-    closest_screen.clone()
-}
-
-/// Convert absolute window pos to one that's relative to the screen the window is on.
-fn relative_bounds(window_bounds: &Rect, screens: &BTreeMap<u32, ScreenInfo>) -> (CGDirectDisplayID, Rect) {
-    for (index, screen) in screens {
-        if screen.frame.contains_origin(window_bounds) {
-            return (
-                *index,
-                Rect {
-                    x: window_bounds.x - screen.frame.x,
-                    y: window_bounds.y - screen.frame.y,
-                    w: window_bounds.w,
-                    h: window_bounds.h,
-                },
-            );
-        }
-    }
-
-    (
-        1, // Default to the primary screen.
-        Rect {
-            x: 0,
-            y: 0,
-            w: window_bounds.w,
-            h: window_bounds.h,
-        },
-    )
-}
-
-/// Convert absolute window pos to one that's relative to the screen the window is on.
-fn absolute_bounds(window_pos: &WindowPos, screen_info: &ScreenInfo, screens: &BTreeMap<u32, ScreenInfo>) -> Rect {
-    let screen = closest_screen(&screen_info, &screens);
-
-    window_pos.to_absolute(&screen)
 }
 
 /// Given an Owner ID and Window ID from the `CGWindowList` API, returns the corresponding `AXUIElementRef` to

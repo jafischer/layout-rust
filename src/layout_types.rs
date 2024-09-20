@@ -1,22 +1,21 @@
-use std::collections::BTreeMap;
-use std::fmt::Display;
-
 use core_graphics_types::base::CGFloat;
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
+use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::Display;
 
 use crate::layout_types::MaybeRegex::{Exact, RE};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Layout {
-    pub screens: BTreeMap<u32, ScreenInfo>,
     pub windows: Vec<WindowInfo>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ScreenInfo {
     pub frame: Rect,
+    pub screen_id: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -29,7 +28,7 @@ pub struct WindowInfo {
     // the `skip_serializing, skip_deserializing`.
     #[serde(skip_serializing, skip_deserializing)]
     pub matching_windows: Vec<MatchingWindowInfo>,
-    pub screen_num: u32,
+    pub screen_num: usize,
     pub pos: WindowPos,
 }
 
@@ -37,15 +36,15 @@ pub struct WindowInfo {
 pub enum WindowPos {
     #[default]
     Maxed,
+    Pos(Rect),
     Left(f32),
     Right(f32),
     Top(f32),
     Bottom(f32),
-    Pos(Rect),
 }
 
 impl WindowPos {
-    pub(crate) fn to_absolute(&self, screen: &ScreenInfo) -> Rect {
+    pub fn to_absolute(&self, screen: &ScreenInfo) -> Rect {
         match self {
             WindowPos::Maxed => Rect {
                 x: screen.frame.x,
@@ -95,6 +94,39 @@ impl WindowPos {
             }
         }
     }
+
+    pub fn to_relative(&self, screens: &Vec<ScreenInfo>) -> (usize, Rect) {
+        match self {
+            WindowPos::Pos(rect) => {
+                for (index, screen) in screens.iter().enumerate() {
+                    if screen.frame.contains_origin(rect) {
+                        return (
+                            index + 1,
+                            Rect {
+                                x: rect.x - screen.frame.x,
+                                y: rect.y - screen.frame.y,
+                                w: rect.w,
+                                h: rect.h,
+                            },
+                        );
+                    }
+                }
+
+                debug!("WindowPos::to_relative(): no screen found for abs pos ({}, {})", rect.x, rect.y);
+
+                (
+                    1, // Default to the first screen.
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        w: rect.w,
+                        h: rect.h,
+                    },
+                )
+            }
+            _ => (0, Rect::default()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -112,7 +144,7 @@ pub struct MatchingWindowInfo {
     // We also store a copy of the window position here, because in the "save" case we'll just save a single
     // position to the output file, but in the "restore" case we need to know the position of each window with
     // the same owner & window names.
-    pub screen_num: u32,
+    pub screen_num: usize,
     pub bounds: Rect,
 }
 

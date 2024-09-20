@@ -1,4 +1,6 @@
 target/
 Cargo.lock
 .vscode/
-# Don't want to ignore .idea/
+# Don't want to ignore 
+#.idea/
+Layout.app/Contents/MacOS/

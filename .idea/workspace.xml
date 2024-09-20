@@ -10,6 +10,9 @@
     <list default="true" id="f5b95237-7811-4a33-be0c-ddf54dfc6139" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/args.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/args.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/layout_types.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/layout_types.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -17,6 +20,7 @@
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="ExecutionTargetManager" SELECTED_TARGET="RsBuildProfile:dev" />
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
@@ -96,7 +100,7 @@
       </method>
     </configuration>
     <configuration name="layout restore" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-      <option name="command" value="run -- --log-level trace restore" />
+      <option name="command" value="run -- --log-level debug restore --path ./just-terminal.yaml" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -168,7 +172,10 @@
       <workItem from="1721099300177" duration="12540000" />
       <workItem from="1721840793209" duration="253000" />
       <workItem from="1723571296303" duration="335000" />
-      <workItem from="1723572112151" duration="2060000" />
+      <workItem from="1723572112151" duration="2891000" />
+      <workItem from="1723756164386" duration="660000" />
+      <workItem from="1724088639037" duration="37000" />
+      <workItem from="1726851124485" duration="13197000" />
     </task>
     <servers />
   </component>

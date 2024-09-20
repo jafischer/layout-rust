@@ -10,7 +10,7 @@ pub struct Args {
     pub log_level: LevelFilter,
 
     /// The path to the layout file.
-    #[arg(short, long, default_value = "~/.layout.yaml")]
+    #[arg(short, long, default_value = "~/.layout.yaml", global = true)]
     pub path: String,
 
     #[command(subcommand)]
