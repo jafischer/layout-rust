@@ -1,0 +1,6 @@
+windows:
+  - owner_name: Terminal
+    name: .*
+    screen_num: 2
+    pos: !Maxed
+
