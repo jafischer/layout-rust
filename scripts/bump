@@ -1,20 +1,42 @@
 #!/bin/bash
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 main() {
-  BUMP_FIELD=patch
+  set_globals
   parse_options "$@"
-
-  cd ${SCRIPT_DIR}/..
 
   cargo set-version --bump $BUMP_FIELD
 
   if [[ $COMMIT == "yes" ]]; then
-    local lock_arg
+    local extra_files version
+
+    version=$(grep '^version' Cargo.toml | awk -F'"' '{print $2}')
+
     # Include Cargo.lock if it's not ignored.
-    grep Cargo.lock "$SCRIPT_DIR/../.gitignore" >& /dev/null || lock_arg=Cargo.lock
-    git commit Cargo.toml $lock_arg -m "Bump $BUMP_FIELD to $(grep '^version' Cargo.toml | awk -F'"' '{print $2}')"
+    grep Cargo.lock "$SCRIPT_DIR/../.gitignore" >& /dev/null || extra_files=Cargo.lock
+
+    # Include version.yaml if it exists.
+    if [[ -e version.yaml ]]; then
+      extra_files="$extra_files version.yaml"
+      echo "version: $version" > version.yaml
+    fi
+    git commit Cargo.toml $extra_files -m "Bump $BUMP_FIELD to $version"
+  fi
+}
+
+set_globals() {
+  SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+  cd ${SCRIPT_DIR}/..
+
+  if [[ -e "${SCRIPT_DIR}/.default_bump_field" ]]; then
+    BUMP_FIELD=$(cat "${SCRIPT_DIR}/.default_bump_field")
+  elif [[ -e version.yaml ]]; then
+    # Since Jenkins changes the version in version.yaml to major.minor.timestamp, set the
+    # default field to minor.
+    BUMP_FIELD=minor
+  else
+    BUMP_FIELD=patch
   fi
 }
 
@@ -29,6 +51,9 @@ parse_options() {
         ;;
       --min | --minor)
         BUMP_FIELD=minor
+        ;;
+      --pat | --patch)
+        BUMP_FIELD=patch
         ;;
       *)
         usage
@@ -46,9 +71,13 @@ usage() {
   log "${YELLOW}$(basename "$0") [OPTIONS]"
   log ""
   log "Options:"
-  log "${YELLOW}-c, --commit   -- Commit the updated Cargo.toml"
-  log "${YELLOW}--maj, --major -- Bump the major field (default is the patch field)"
-  log "${YELLOW}--min, --minor -- Bump the minor field (default is the patch field)"
+  log "${YELLOW}-c, --commit     Commit the updated file(s)"
+  log "${YELLOW}                 (Cargo.toml, Cargo.lock if it's not git-ignored, and version.yaml if it exists)"
+  log "${YELLOW}--maj, --major   Bump the major field (default is $BUMP_FIELD)"
+  log "${YELLOW}--min, --minor   Bump the minor field (default is $BUMP_FIELD)"
+  log "${YELLOW}--pat, --patch   Bump the patch field (default is $BUMP_FIELD)"
+  log ""
+  log "Note: to change the default field, put the field name in ${SCRIPT_DIR}/.default_bump_field"
   log ""
 
   exit

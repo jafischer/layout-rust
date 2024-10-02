@@ -10,4 +10,4 @@ single_line_if_else_max_width = 120
 group_imports = "StdExternalCrate"
 
 # See https://rust-lang.github.io/rustfmt for description of options.
-# You can also obtain a list of options via `rustfmt --print-config current`)
+# You can also obtain a list of options via `rustfmt --print-config current .`)
