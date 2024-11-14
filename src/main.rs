@@ -1,12 +1,20 @@
 #[macro_use]
 extern crate objc;
 
+use std::collections::{BTreeMap, HashSet};
+use std::ffi::c_void;
+use std::fs::File;
+use std::io::BufReader;
+use std::thread::sleep;
+use std::time::Duration;
+
 use accessibility_sys::{
     kAXErrorSuccess, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint, kAXValueTypeCGSize,
     kAXWindowsAttribute, AXError, AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef,
     AXUIElementSetAttributeValue, AXValueCreate,
 };
 use anyhow::anyhow;
+use args::Args;
 use clap::Parser;
 use cocoa::appkit::NSScreen;
 use cocoa_foundation::base::{id, nil};
@@ -18,19 +26,11 @@ use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_graphics::display;
 use core_graphics::display::{CGDisplay, CGWindowID};
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
+use layout_types::{Layout, Rect, ScreenInfo, WindowInfo, MIN_HEIGHT, MIN_WIDTH};
 use log::{debug, error, trace, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
 use log4rs::config::{Appender, Root};
 use regex::Regex;
-use std::collections::{BTreeMap, HashSet};
-use std::ffi::c_void;
-use std::fs::File;
-use std::io::BufReader;
-use std::thread::sleep;
-use std::time::Duration;
-
-use args::Args;
-use layout_types::{Layout, Rect, ScreenInfo, WindowInfo, MIN_HEIGHT, MIN_WIDTH};
 
 use crate::args::Command;
 use crate::dict_utils::{get_dict_from_dict, get_num_from_dict, get_string_from_dict};

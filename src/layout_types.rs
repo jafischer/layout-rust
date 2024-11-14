@@ -1,9 +1,10 @@
+use std::fmt::Display;
+
 use core_graphics_types::base::CGFloat;
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt::Display;
 
 use crate::layout_types::MaybeRegex::{Exact, RE};
 

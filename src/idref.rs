@@ -1,6 +1,7 @@
+use std::ops::Deref;
+
 use cocoa_foundation::base::{id, nil};
 use cocoa_foundation::foundation::NSAutoreleasePool;
-use std::ops::Deref;
 
 // Got this from https://github.com/tauri-apps/tao although I've seen it in several github repos.
 #[derive(Debug, PartialEq)]
