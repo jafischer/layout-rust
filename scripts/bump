@@ -20,7 +20,7 @@ main() {
       extra_files="$extra_files version.yaml"
       echo "version: $version" > version.yaml
     fi
-    git commit Cargo.toml $extra_files -m "Bump $BUMP_FIELD to $version"
+    git commit $(find . -name Cargo.toml) $extra_files -m "Bump $BUMP_FIELD to $version"
   fi
 }
 
