@@ -5,7 +5,11 @@ main() {
   set_globals
   parse_options "$@"
 
-  cargo set-version --bump $BUMP_FIELD
+  cargo --list | grep set-version > /dev/null || {
+    log "Installing cargo-edit"
+    cargo install cargo-edit
+  }
+  cargo set-version --bump "$BUMP_FIELD"
 
   if [[ $COMMIT == "yes" ]]; then
     local extra_files version
@@ -20,6 +24,8 @@ main() {
       extra_files="$extra_files version.yaml"
       echo "version: $version" > version.yaml
     fi
+    # shellcheck disable=SC2046
+    # shellcheck disable=SC2086
     git commit $(find . -name Cargo.toml) $extra_files -m "Bump $BUMP_FIELD to $version"
   fi
 }
@@ -27,33 +33,40 @@ main() {
 set_globals() {
   SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-  cd ${SCRIPT_DIR}/..
+  # shellcheck disable=SC2164
+  cd "${SCRIPT_DIR}/.."
 
   if [[ -e "${SCRIPT_DIR}/.default_bump_field" ]]; then
-    BUMP_FIELD=$(cat "${SCRIPT_DIR}/.default_bump_field")
+    BUMP_FIELD="$(cat "${SCRIPT_DIR}/.default_bump_field")"
   elif [[ -e version.yaml ]]; then
     # Since Jenkins changes the version in version.yaml to major.minor.timestamp, set the
     # default field to minor.
-    BUMP_FIELD=minor
+    BUMP_FIELD="minor"
   else
-    BUMP_FIELD=patch
+    BUMP_FIELD="patch"
   fi
+
+  # Define some colors:
+  RED='\x1b[1;31m'
+  YELLOW='\x1b[1;33m'
+  CYAN='\x1b[1;36m'
+  NC='\x1b[0m' # No Color
 }
 
 parse_options() {
   while [[ -n ${1} ]]; do
     case ${1} in
       -c | --commit)
-        COMMIT=yes
+        COMMIT="yes"
         ;;
       --maj | --major)
-        BUMP_FIELD=major
+        BUMP_FIELD="major"
         ;;
       --min | --minor)
-        BUMP_FIELD=minor
+        BUMP_FIELD="minor"
         ;;
       --pat | --patch)
-        BUMP_FIELD=patch
+        BUMP_FIELD="patch"
         ;;
       *)
         usage
@@ -83,13 +96,30 @@ usage() {
   exit
 }
 
-# Define some colors:
-black='\x1b[0;30m'; red='\x1b[0;31m'; green='\x1b[0;32m'; yellow='\x1b[0;33m'; blue='\x1b[0;34m'; pink='\x1b[0;35m'; cyan='\x1b[0;36m'; grey='\x1b[0;37m';
-BLACK='\x1b[1;30m'; RED='\x1b[1;31m'; GREEN='\x1b[1;32m'; YELLOW='\x1b[1;33m'; BLUE='\x1b[1;34m'; PINK='\x1b[1;35m'; CYAN='\x1b[1;36m'; WHITE='\x1b[1;37m'
-NC='\x1b[0m' # No Color
-
 log() {
   echo -e "${CYAN}$*$NC" 1>&2
+}
+
+log_heading() {
+  local heading="$*" ruler
+  ruler=$(echo -n "$heading" | sed -e 's/./=/g')
+
+  echo -e "${CYAN}+=${ruler}=+$NC" 1>&2
+  echo -e "${CYAN}| $* |$NC" 1>&2
+  echo -e "${CYAN}+=${ruler}=+$NC" 1>&2
+}
+
+log_error() {
+  echo -e "${RED}$*$NC" 1>&2
+}
+
+die() {
+  log_error "ERROR: $*"
+  exit 1
+}
+
+do_or_die() {
+  "$@" || die "Command failed: '$*'"
 }
 
 main "$@"
